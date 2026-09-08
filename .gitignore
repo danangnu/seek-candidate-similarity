@@ -1,0 +1,21 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment (matches your local 'venv' folder)
+venv/
+.venv/
+env/
+ENV/
+
+# VS Code & IDE settings
+.vscode/
+.idea/
+
+# Operating system files
+Thumbs.db
+.DS_Store
+
+# Temporary log / output files
+*.log
