@@ -45,9 +45,22 @@ test_nonblank_old_integer_link_not_overwritten (test_detail_repository.DetailRep
 test_other_numeric_id_uuid_conflict (test_detail_repository.DetailRepositoryTest.test_other_numeric_id_uuid_conflict) ... ok
 test_pending_and_write_use_detail_columns_only (test_detail_repository.DetailRepositoryTest.test_pending_and_write_use_detail_columns_only) ... ok
 test_previous_plain_list_audit_rolls_back_old_main_table (test_detail_repository.DetailRepositoryTest.test_previous_plain_list_audit_rolls_back_old_main_table) ... ok
+test_database_error_has_no_raw_connection_details (test_runtime_breaks.RuntimeBreakTest.test_database_error_has_no_raw_connection_details) ... ok
+test_each_running_user_has_independent_timer (test_runtime_breaks.RuntimeBreakTest.test_each_running_user_has_independent_timer) ... ok
+test_exactly_one_hour_and_later_use_minutes (test_runtime_breaks.RuntimeBreakTest.test_exactly_one_hour_and_later_use_minutes) ... ok
+test_invalid_missing_or_reversed_settings_stop (test_runtime_breaks.RuntimeBreakTest.test_invalid_missing_or_reversed_settings_stop) ... ok
+test_keyboard_interrupt_stops_break (test_runtime_breaks.RuntimeBreakTest.test_keyboard_interrupt_stops_break) ... ok
+test_long_break_does_not_reset_timer_and_updates_progress (test_runtime_breaks.RuntimeBreakTest.test_long_break_does_not_reset_timer_and_updates_progress) ... ok
+test_refresh_reads_changes_at_next_boundary (test_runtime_breaks.RuntimeBreakTest.test_refresh_reads_changes_at_next_boundary) ... ok
+test_repository_reads_only_four_settings_from_local_connection (test_runtime_breaks.RuntimeBreakTest.test_repository_reads_only_four_settings_from_local_connection) ... ok
+test_run_stops_when_settings_disappear_without_attempting_second_profile (test_runtime_breaks.RuntimeBreakTest.test_run_stops_when_settings_disappear_without_attempting_second_profile) ... ok
+test_short_break_counts_towards_run_duration (test_runtime_breaks.RuntimeBreakTest.test_short_break_counts_towards_run_duration) ... ok
+test_timer_starts_after_login_and_first_candidate_has_no_break (test_runtime_breaks.RuntimeBreakTest.test_timer_starts_after_login_and_first_candidate_has_no_break) ... ok
+test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.RuntimeBreakTest.test_under_hour_uses_seconds_and_both_inclusive_endpoints) ... ok
+test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
 
 ----------------------------------------------------------------------
-Ran 47 tests in 0.028s
+Ran 60 tests in 0.042s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -56,13 +69,14 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-2026-09-09 content-match update: 47 offline tests passed.
-Supplied numeric/UUID HTML fixtures: identical normalized main Profile content;
-matching SHA-256: 2ceabdf31998284ec374c9729dce08316110780ff23ae53096f020d523379e6d.
-Tests cover changed descriptions/education/dates/skills/unknown sections, same-name
-competitors, exact matching without summaries, early stop and next numeric ID,
-no automatic Ollama calls/prompts, dry-run behavior, singular result counts,
-detail-only database writes, collisions, transactional failure and rollback.
-Seven repository tests use a SQLite adapter; actual MariaDB DDL and locking,
-SEEK browser sign-in/loading/search, and local Ollama were NOT tested here.
-No live database writes were made. Python syntax checks passed.
+2026-09-09 runtime breaks update: 60 offline tests passed.
+Thirteen new tests use a fake monotonic clock, fake sleeps and mocked database
+reads; no real 1-hour wait was necessary. Boundaries at 3,599 / 3,600 / 3,601
+seconds, inclusive random ranges, seconds/minutes conversion, long-break
+continuation, per-run reviewer isolation, settings refresh, invalid settings,
+zero ranges, Ctrl+C and connection refresh were checked.
+Seven repository tests use a SQLite adapter for UUID writes and rollback.
+Actual MariaDB DDL, network idle timeouts, SEEK sign-in/search and real timed
+production sessions were NOT tested here. No live database writes were made.
+Profile content matching and detail UUID destination remain unchanged.
+Python syntax and configuration JSON checks passed.

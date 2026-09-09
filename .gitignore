@@ -1,41 +1,7 @@
-# Python bytecode & cache
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual environment (matches your local 'venv' folder)
-venv/
 .venv/
-env/
-ENV/
-
-# VS Code & IDE settings
-.vscode/
-.idea/
-
-# Operating system files
-Thumbs.db
-.DS_Store
-
-# Temporary log / output files
-*.log
-# Local configuration and credentials
+__pycache__/
 config.json
-.env
-.env.*
-!.env.example
-
-# Environments and generated files
-venv/
-.venv/
-__pycache__/
-*.pyc
 reports/
-*.log
-
-# Candidate data and database exports
-*.csv
-*.sql
-*.html
-seekid.txt
-uuid.txt
+*.txt
+!requirements.txt
+!VALIDATION.txt

@@ -8,6 +8,7 @@ from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 from profiles import extract_candidate_profile, read_html, compare_evidence, compare_profiles_with_ollama, norm, canonical_uuid, automatic_match_decision
 from repository import Repository, blank, fingerprint
+from runtime_breaks import RuntimeBreaks, BreakSettingsError
 
 
 def resolve_file(value, config):
@@ -79,6 +80,8 @@ def run(args, config, repo):
     pending = set(repo.ids())
     ids = [args.id] if args.id else [i for i in csv_ids(args.csv) if i in pending] if args.csv else sorted(pending)
     ids = ids[:args.limit]
+    breaks = RuntimeBreaks(config['reviewer'], repo.scrap_idle_settings,
+                           config.get('breaks', {}).get('settings_id', 1)) if ids else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
     try:
@@ -96,6 +99,18 @@ def run(args, config, repo):
                 if browser is None:
                     browser = SeekBrowser(config.get('browser', {}))
                     browser.login()
+                    breaks.start()
+                report['stage'] = 'runtime_break'
+                report['runtime_break'] = breaks.before_candidate()
+                # The wait may exceed the database idle timeout. Refresh outside any write transaction.
+                breaks.refresh()
+                rows = repo.rows(numeric_id)
+                if not rows:
+                    raise ValueError('Numeric ID disappeared from the local target during the break')
+                if not any(blank(r['uuid']) for r in rows):
+                    report['status'] = 'already_mapped'
+                    write_report(folder, numeric_id, report)
+                    continue
                 if source_mode == 'live_numeric':
                     report['stage'] = 'loading_live_numeric_profile'
                     old, source = browser.numeric_profile(numeric_id)
@@ -193,7 +208,7 @@ def run(args, config, repo):
                         evidence = {'source': source, 'old_profile': old, 'selected': selected,
                                     'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
                                     'profiles_not_visited': report['profiles_not_visited'],
-                                    'search_scan': report.get('search_scan'),
+                                    'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
                                     'candidates_compared': len(ordered), 'review_mode': 'automatic',
                                     'review_reason': decision['reason'], 'automatic_decision': decision,
                                     'candidate_ranks': [{'uuid': c['uuid'], 'name': c['profile']['candidate_name'],
@@ -229,7 +244,7 @@ def run(args, config, repo):
                     else:
                         evidence = {'source': source, 'old_profile': old, 'selected': selected,
                                     'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
-                                    'search_scan': report.get('search_scan'),
+                                    'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
                                     'candidates_compared': len(ordered), 'review_mode': 'manual', 'review_reason': reason}
                         report['stage'] = 'saving_uuid'
                         change_id, count = repo.apply(numeric_id, selected['uuid'], fingerprint(rows), evidence,
@@ -237,6 +252,10 @@ def run(args, config, repo):
                         report.update({'status': 'saved', 'change_id': change_id, 'rows_updated': count})
                         print('Saved', count, 'target rows. Rollback change ID:', change_id)
                 write_report(folder, numeric_id, report)
+            except BreakSettingsError as ex:
+                report.update(status='stopped_invalid_break_settings', reason=str(ex))
+                write_report(folder, numeric_id, report)
+                raise
             except Exception as ex:
                 if report.get('status') == 'saved':
                     print('Mapping WAS committed; report write failed. Check the database audit table. Change ID:', report.get('change_id'))
@@ -322,7 +341,7 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print('\nStopped. Any committed mappings remain in the audit table.')
     except Exception as error:
-        print('Stopped:', str(error) if type(error) is ValueError else type(error).__name__)
+        print('Stopped:', str(error) if isinstance(error, (ValueError, BreakSettingsError)) else type(error).__name__)
         if error.args and type(error.args[0]) is int:
             print('Database error code:', error.args[0], '(check local credentials, permissions and schema)')
         raise SystemExit(1)

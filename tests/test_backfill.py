@@ -208,6 +208,7 @@ class LiveNumericTest(unittest.TestCase):
         if detail:
             repo.target_table='seek_scrap_detail'
             repo.rows.return_value[0].update({'name':None,'file':None,'scrap_date':None})
+        repo.scrap_idle_settings.return_value = dict(idle_less_than=0, idle_less_than2=0, idle_more_than=0, idle_more_than2=0)
         browser=Mock()
         browser.numeric_profile.return_value=(profile, {'mode':'live_numeric','numeric_seek_id':42})
         browser.search.return_value=({UID:'https://au.employer.seek.com/talentsearch/profiles/'+UID},True,'')
@@ -340,6 +341,7 @@ class AutomaticWorkflowTest(unittest.TestCase):
         repo.rows.return_value=[{'id_pk':1,'id':42,'uuid':None,'name':'Alex Example','file':'','scrap_date':None}]
         repo.apply.return_value=('22222222-2222-2222-2222-222222222222',1)
         if conflict:repo.apply.side_effect=ValueError('Conflicting approved identity mapping')
+        repo.scrap_idle_settings.return_value = dict(idle_less_than=0, idle_less_than2=0, idle_more_than=0, idle_more_than2=0)
         browser=Mock();browser.numeric_profile.return_value=(profile,{'mode':'live_numeric'})
         browser.search.return_value=({UID:'https://au.employer.seek.com/talentsearch/profiles/'+UID},True,'')
         other='11111111-1111-1111-1111-111111111111'

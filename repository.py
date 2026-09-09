@@ -75,6 +75,21 @@ class Repository:
             self.server = cur.fetchone()
         self.preflight([self.target_table], check_type=False)
 
+    def scrap_idle_settings(self, settings_id=1):
+        from runtime_breaks import BreakSettingsError
+        if type(settings_id) is not int or settings_id < 1:
+            raise BreakSettingsError('breaks.settings_id must be a positive integer.')
+        # Called outside candidate write transactions; long pauses can expire a connection.
+        self.connection.ping(reconnect=True)
+        with self.connection.cursor() as cur:
+            cur.execute('SELECT idle_less_than, idle_less_than2, idle_more_than, idle_more_than2 '
+                        'FROM seek_scrap_settings WHERE id=%s', (settings_id,))
+            row = cur.fetchone()
+        if row is None:
+            raise BreakSettingsError('No local seek_scrap_settings row with id='+str(settings_id)+
+                                     '. Run setup_local_scrap_settings.sql or set breaks.settings_id.')
+        return row
+
     def preflight(self, tables, check_type=True, target_table=None):
         target = target_table or self.target_table
         with self.connection.cursor() as cur:

@@ -12,6 +12,88 @@ This extends your two-file Python comparison script into a visible Chrome workfl
 
 The program is separate from the VB.NET application. It does not use `DllConnection`, `SQLSetting.ini`, TrackIt login tables, the shared LIVE configuration, or the VB application's browser. Database access is explicitly limited to localhost and a `seek_uuid_test_...` database in this version.
 
+## Breaks from local seek_scrap_settings (September 9 update)
+
+The Python scraper now reads `seek_scrap_settings` through the SAME local
+connection as the candidate tables. The default settings row is `id=1`.
+Only `idle_less_than`, `idle_less_than2`, `idle_more_than` and `idle_more_than2`
+are read; `updated_by` is the settings editor, not the current running user.
+The user identity is `reviewer` from your `config.json`.
+
+| Elapsed time for this run | Random break between candidate attempts | Values in your uploaded settings |
+| --- | --- | --- |
+| Less than 1 hour | `idle_less_than` to `idle_less_than2` seconds | 30–300 seconds |
+| At least 1 hour | `idle_more_than` to `idle_more_than2` minutes | 5–25 minutes |
+
+Breaks occur before moving to the next numeric candidate after either a
+successful or unresolved attempt. There is no initial break and no unnecessary
+break after the last candidate. The existing `browser.delay_seconds` pauses
+still occur before individual browser requests, including visits to multiple
+UUID profiles for one numeric candidate. Runtime breaks are additional and do
+not replace those request delays. A single candidate that takes over an hour
+finishes its attempt before the between-candidate break.
+
+The monotonic run timer starts after manual SEEK sign-in. It measures elapsed
+wall-clock time, INCLUDING short and long breaks. Exactly 3,600 seconds uses the
+minutes range. A long break does not reset the timer; subsequent breaks use
+minutes for the remainder of that run. Each Python process has its own timer
+and reviewer. Restarting starts a NEW timer; this version does not aggregate
+running time across processes, PCs, the VB application or earlier runs.
+
+Range endpoints are inclusive. Both zero endpoints mean no additional break
+for that phase. Missing, NULL, negative, non-integer or reversed settings stop
+the run with an explanation rather than silently using a different delay.
+Values refresh from the local table at each candidate boundary. The current
+wait finishes at the duration already selected if settings change mid-break.
+Console countdowns appear once a minute during long waits; Ctrl+C stops promptly.
+Breaks occur outside database write transactions. The database connection is
+refreshed outside those transactions after a long pause.
+
+### Install this update
+
+1. Stop the current run with Ctrl+C.
+2. Replace `compare.py` and `repository.py`; add the new `runtime_breaks.py`.
+   Alternatively copy all five application Python files from this ZIP. Keep your
+   existing `config.json` and existing saved reports.
+3. In LOCAL HeidiSQL, open and execute `setup_local_scrap_settings.sql` from this
+   ZIP once. It selects `seek_uuid_test_trackitlive`, preserves an existing table
+   and row, and creates settings id=1 with 30/300 seconds and 5/25 minutes only
+   if that row is missing. It does not import email addresses or OTP history.
+   If your local test database has a different name, change ONLY the `USE` line
+   to that local database first. Do not run the original dump unchanged: it
+   selects `trackitlive`.
+4. Run the same command as before, for example:
+
+```powershell
+python compare.py run --limit 5 --apply --auto-save
+```
+
+No config change is needed for settings id=1. To select another existing row,
+add a top-level configuration entry:
+
+```json
+"breaks": { "settings_id": 1 }
+```
+
+Inspect or adjust the settings in your LOCAL database:
+
+```sql
+SELECT id, idle_less_than, idle_less_than2, idle_more_than, idle_more_than2
+FROM seek_uuid_test_trackitlive.seek_scrap_settings
+WHERE id = 1;
+```
+
+The connected local database account needs SELECT permission on this table;
+setup additionally needs CREATE and INSERT. No live database connection is
+introduced by this update. UUID target and exact-content matching are unchanged.
+Each report and saved mapping's audit evidence includes `runtime_break` with
+the reviewer, elapsed time, chosen duration and settings used.
+
+If committing this update to GitHub, include the new `runtime_breaks.py` and
+`tests/test_runtime_breaks.py`. If your `.gitignore` ignores all SQL files, use
+`git add -f setup_local_scrap_settings.sql` for this setup script only. Keep
+actual database exports and `config.json` out of the commit.
+
 ## Faster name filtering
 
 The browser now reads candidate names directly from the result cards before
@@ -58,8 +140,8 @@ saved HTML files.
 
 ### Update your existing installation
 
-Stop the program. Replace ALL FOUR application files from this ZIP:
-`compare.py`, `profiles.py`, `seek_browser.py` and `repository.py`. Keep your
+Stop the program. Replace ALL FIVE application files from this ZIP:
+`compare.py`, `profiles.py`, `seek_browser.py`, `repository.py` and `runtime_breaks.py`. Keep your
 own `config.json`, and add this field INSIDE its `database` object:
 
 ```json
@@ -152,7 +234,7 @@ Edit `config.json`:
 
 - `database.host`: `127.0.0.1`
 - `database.port`: your local MariaDB port, normally `3306`
-- `database.user`: a local account with SELECT/UPDATE on the selected target, and CREATE/SELECT/INSERT/UPDATE/DELETE for the mapping/audit tables. `prepare-detail` additionally needs ALTER/INSERT on `seek_scrap_detail` and SELECT on local `seek_scrap`.
+- `database.user`: a local account with SELECT on `seek_scrap_settings`, SELECT/UPDATE on the selected target, and CREATE/SELECT/INSERT/UPDATE/DELETE for the mapping/audit tables. `prepare-detail` additionally needs ALTER/INSERT on `seek_scrap_detail` and SELECT on local `seek_scrap`.
 - `database.database`: `seek_uuid_test_trackitlive`
 - `reviewer`: your staff ID
 
@@ -371,7 +453,7 @@ or access restricted content; it compares the Profile content present in the DOM
 
 ## Quick test of the updated matching rule
 
-Keep your local database configuration and ten-second delay, replace the four
+Keep your local database configuration and ten-second delay, replace the five
 Python files, and run:
 
 ```powershell
@@ -475,7 +557,7 @@ The original two-file comparison is still available, without importing code trig
 
 Supply your own existing `seekid.txt` and `uuid.txt`; candidate HTML and database exports are not bundled in this code package.
 
-Validation performed here: 47 automated offline tests, Python syntax checks, extraction against both supplied comparison profiles and the earlier full-profile capture. Seven repository tests execute target updates and rollback through a SQLite adapter; they do not validate MariaDB-specific DDL or locking. Tests cover detail-only writes, preservation of old numeric values, transaction failure, collision checks and rollback of older main-table audit records. The supplied numeric/UUID HTML pair produced identical normalized full Profile content and matching hashes. Both comparison profiles yielded four career entries with job titles, two education entries and eight licence/certification entries. The separate CV-tab capture correctly failed the full-profile readiness check.
+Validation performed here: 60 automated offline tests, Python syntax checks, extraction against both supplied comparison profiles and the earlier full-profile capture. Seven repository tests execute target updates and rollback through a SQLite adapter; they do not validate MariaDB-specific DDL or locking. Tests cover detail-only writes, preservation of old numeric values, transaction failure, collision checks and rollback of older main-table audit records. The supplied numeric/UUID HTML pair produced identical normalized full Profile content and matching hashes. Both comparison profiles yielded four career entries with job titles, two education entries and eight licence/certification entries. The separate CV-tab capture correctly failed the full-profile readiness check.
 
 **Not tested here:** actual SEEK sign-in/search, a running local Ollama model, or live MariaDB writes/rollback. Start with one candidate in the local test database and verify the saved rows and rollback before a larger batch. No production writes were performed.
 
@@ -484,7 +566,9 @@ Validation performed here: 47 automated offline tests, Python syntax checks, ext
 - `compare.py`: command-line workflow, live/archived source selection, review and reports.
 - `profiles.py`: HTML extraction, UUID validation, matching evidence and Ollama API.
 - `seek_browser.py`: visible Chrome sign-in, numeric/UUID profiles, name search, pagination and pauses.
-- `repository.py`: local-only database connection, mapping transaction and rollback.
+- `repository.py`: local-only database connection, settings reads, mapping transaction and rollback.
+- `runtime_breaks.py`: reviewer/run timer and database-driven random breaks.
+- `setup_local_scrap_settings.sql`: local table and settings preparation.
 - `config.example.json`, `requirements.txt`: setup.
 - `tests/test_backfill.py`: offline regression tests.
 
