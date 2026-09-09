@@ -135,7 +135,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         repo.ids.return_value=[42]
         repo.rows.return_value=[dict(id_pk=1,id=42,uuid=None,name=None,file=None,scrap_date=None)]
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
-        repo.apply.return_value=('change-test',1)
+        repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}
         profile=extract_candidate_profile(FIXTURE)
         browser=Mock();browser.numeric_profile.return_value=(profile,{'mode':'live_numeric'})
         browser.search.return_value=({UID:'https://au.employer.seek.com/talentsearch/profiles/'+UID},True,'')
@@ -146,8 +146,8 @@ class RemoteWorkflowTest(unittest.TestCase):
             with patch('seek_browser.SeekBrowser',return_value=browser),patch('compare.compare_profiles_with_ollama',return_value={'is_same_person':False,'confidence':.8,'reason':'Advisory'}) as model,contextlib.redirect_stdout(io.StringIO()):
                 run(args,config,repo)
             model.assert_called_once_with(profile,profile,endpoint='http://ai.internal.example:11434',model='llama3.1:8b')
-            self.assertEqual(json.loads(next(Path(folder).rglob('42.json')).read_text())['status'],'saved')
-        repo.apply.assert_called_once()
+            self.assertEqual(json.loads(next(Path(folder).rglob('42.json')).read_text())['status'],'submitted')
+        repo.submit_proposal.assert_called_once()
 
     def test_check_connections_never_mutates_database_or_opens_browser(self):
         repo=Mock();repo.target_table='seek_scrap_detail'
@@ -155,7 +155,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         with patch('compare.check_ollama') as model,patch('seek_browser.SeekBrowser') as browser,contextlib.redirect_stdout(io.StringIO()):
             check_connections({'ollama':{'endpoint':'http://ai.internal.example:11434'}},repo)
         model.assert_called_once();browser.assert_not_called()
-        repo.apply.assert_not_called();repo.initialize.assert_not_called();repo.prepare_detail.assert_not_called()
+        repo.submit_proposal.assert_not_called();repo.initialize.assert_not_called();repo.prepare_detail.assert_not_called()
 
     def test_database_schema_failure_does_not_skip_ollama_diagnostic(self):
         repo=Mock();repo.target_table='seek_scrap_detail';repo.preflight.side_effect=ValueError('Wrong column type')

@@ -6,7 +6,6 @@
     "database": "seek_uuid_test_trackitlive",
     "target_table": "seek_scrap_detail"
   },
-  "reviewer": "dnurdiansyah",
   "ollama": {
     "endpoint": "http://127.0.0.1:11434",
     "model": "llama3.1:8b"
@@ -23,5 +22,9 @@
   "source_mode": "live_numeric",
   "breaks": {
     "settings_id": 1
+  },
+  "created_by": "dnurdiansyah",
+  "review": {
+    "assigned_reviewer": null
   }
 }

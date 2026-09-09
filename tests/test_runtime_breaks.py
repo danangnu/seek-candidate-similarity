@@ -163,7 +163,7 @@ class RuntimeBreakTest(unittest.TestCase):
             self.assertEqual(json.loads(reports[0].read_text())['status'],'stopped_invalid_break_settings')
         browser.numeric_profile.assert_called_once_with(42)
         browser.close.assert_called_once()
-        repo.apply.assert_not_called()
+        repo.submit_proposal.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

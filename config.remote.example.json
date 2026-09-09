@@ -12,7 +12,6 @@
       "enabled": false
     }
   },
-  "reviewer": "dnurdiansyah",
   "ollama": {
     "endpoint": "http://ollama.internal.example:11434",
     "model": "llama3.1:8b",
@@ -30,5 +29,9 @@
   "source_mode": "live_numeric",
   "breaks": {
     "settings_id": 1
+  },
+  "created_by": "dnurdiansyah",
+  "review": {
+    "assigned_reviewer": null
   }
 }

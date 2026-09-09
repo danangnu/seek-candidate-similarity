@@ -6,9 +6,10 @@ servers. No remote server has been configured or contacted on your behalf.
 
 ## Install and configure
 
-Stop the old run. Copy all six application files from this package into your
+Stop the old run. Copy all seven application files from this package into your
 existing folder: `compare.py`, `repository.py`, `profiles.py`, `seek_browser.py`,
-`runtime_breaks.py`, and `network_config.py`. Keep your reports and existing
+`runtime_breaks.py`, `network_config.py`, and `review_schema.py`. Also copy
+`review_schema.sql` next to them. Keep your reports and existing
 `config.json`. In your activated Python environment:
 
 ```powershell
@@ -28,7 +29,8 @@ Replace the example values with your actual settings:
 | `database.target_table` | Keep `seek_scrap_detail` |
 | `ollama.endpoint` | Ollama base URL, such as `http://YOUR-OLLAMA-SERVER:11434` |
 | `ollama.model` | Model installed on that server, such as `llama3.1:8b` |
-| `reviewer` | Your staff ID |
+| `created_by` | Staff ID running the collector |
+| `review.assigned_reviewer` | Staff ID assigned to review, or null for unassigned |
 
 The example hostnames ending in `.example` are placeholders. The four idle
 settings are read from `seek_scrap_settings` in THIS SAME configured database;
@@ -47,59 +49,56 @@ Put `--config` BEFORE the subcommand in every command:
 python compare.py --config config.remote.json check-connections
 ```
 
-This checks the selected database, destination column, mapping/audit tables,
+This checks the selected database, read-only source columns, review queue/history tables,
 break settings and whether Ollama lists your model. It does not open Chrome,
 send candidate profiles, generate model responses or write database records.
 An available-model check does not guarantee the server has enough memory for
 inference. `--no-ollama` on this command checks MariaDB only.
 
-If only the mapping/audit tables are missing, create them explicitly:
+If only the review queue/history tables are missing, create them explicitly:
 
 ```powershell
 python compare.py --config config.remote.json init-db
 python compare.py --config config.remote.json check-connections
 ```
 
-`init-db` creates `seek_candidate_identity_map` and `seek_uuid_backfill_audit`
-in the configured database. The account needs CREATE for initialization and
-SELECT/INSERT/UPDATE/DELETE for mapping/audit operations, SELECT/UPDATE on the
-chosen target, and SELECT on `seek_scrap_settings`.
+`init-db` creates only `seek_uuid_match_review` and
+`seek_uuid_match_review_history` in the configured database. Routine collection
+needs SELECT on candidate/settings tables and SELECT/INSERT on the two review
+tables. Setup also needs CREATE. No candidate UPDATE or ALTER grants are needed.
 
-The UUID destination remains `seek_scrap_detail.seek_scrap_id`, selected using
-numeric `seekid_detail`. It must be a text column large enough for 36 characters.
-Existing nonblank values are preserved, including old numeric parent links.
-If the remote schema still uses this column as an integer relationship, coordinate
-the schema and consuming VB.NET code before repurposing it. `prepare-detail`
-explicitly alters/seeds the CONFIGURED database; it is never run automatically.
+Numeric IDs are read from `seek_scrap_detail.seekid_detail` by default. The existing
+`seek_scrap_id` may remain an integer parent link; Python never changes it.
+The old `prepare-detail` and `rollback` commands have been removed.
 `setup_local_scrap_settings.sql` targets the LOCAL test database and is not a
-remote setup script. The remote database must contain the chosen settings row.
+remote migration. The selected remote settings row must exist.
 
-## Trial, then save
+## Trial, then submit for review
 
 One candidate, using remote Ollama, WITHOUT database writes:
 
 ```powershell
-python compare.py --config config.remote.json run --limit 1 --auto-save --with-ollama
+python compare.py --config config.remote.json run --limit 1 --auto-propose --with-ollama
 ```
 
-Five candidates, saving qualifying matches automatically:
+Five candidates, submitting qualifying matches as pending reviews:
 
 ```powershell
-python compare.py --config config.remote.json run --limit 5 --apply --auto-save --with-ollama
+python compare.py --config config.remote.json run --limit 5 --submit --auto-propose --with-ollama
 ```
 
-After checking the saved results, process up to one million pending numeric IDs:
+After checking the pending review records, process up to one million pending numeric IDs:
 
 ```powershell
-python compare.py --config config.remote.json run --limit 1000000 --apply --auto-save --with-ollama
+python compare.py --config config.remote.json run --limit 1000000 --submit --auto-propose --with-ollama
 ```
 
-Automatic saving still requires identical normalized COMPLETE Profile content.
+Automatic proposal selection still requires identical normalized COMPLETE Profile content.
 Names, similarity scores and Ollama opinions cannot replace that rule. The first
-qualifying match is saved and the scraper moves to the next numeric ID.
+qualifying comparison is submitted with status pending and the scraper moves to the next numeric ID.
 `--with-ollama` additionally sends the extracted old/new profiles to your chosen
-Ollama server for an advisory opinion. It adds inference time. Without this flag,
-`--auto-save` skips Ollama; it still uses your remote MariaDB. Manual review mode
+Ollama server for an advisory opinion. It adds inference time. Human approval happens only in the separate app. Without this flag,
+`--auto-propose` skips Ollama; it still uses your remote MariaDB. Collection without --auto-propose
 uses Ollama by default unless `--no-ollama` is supplied.
 
 ## Network and TLS
