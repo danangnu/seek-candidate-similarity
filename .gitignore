@@ -19,3 +19,23 @@ Thumbs.db
 
 # Temporary log / output files
 *.log
+# Local configuration and credentials
+config.json
+.env
+.env.*
+!.env.example
+
+# Environments and generated files
+venv/
+.venv/
+__pycache__/
+*.pyc
+reports/
+*.log
+
+# Candidate data and database exports
+*.csv
+*.sql
+*.html
+seekid.txt
+uuid.txt

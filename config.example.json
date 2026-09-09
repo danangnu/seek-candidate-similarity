@@ -1,0 +1,24 @@
+{
+  "database": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "root",
+    "database": "seek_uuid_test_trackitlive",
+    "target_table": "seek_scrap_detail"
+  },
+  "reviewer": "dnurdiansyah",
+  "ollama": {
+    "endpoint": "http://127.0.0.1:11434",
+    "model": "llama3.1:8b"
+  },
+  "browser": {
+    "chromedriver": "",
+    "wait_seconds": 45,
+    "max_search_pages": 5,
+    "max_candidates": 100,
+    "delay_seconds": 10
+  },
+  "path_mappings": [],
+  "report_dir": "reports",
+  "source_mode": "live_numeric"
+}

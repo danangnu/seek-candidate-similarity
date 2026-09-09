@@ -1,0 +1,68 @@
+test_changed_description_is_detected_even_when_roles_match (test_backfill.AutomaticPolicyTest.test_changed_description_is_detected_even_when_roles_match) ... ok
+test_education_dates_skills_and_unknown_sections_are_compared (test_backfill.AutomaticPolicyTest.test_education_dates_skills_and_unknown_sections_are_compared) ... ok
+test_empty_or_unscoped_profile_never_saves (test_backfill.AutomaticPolicyTest.test_empty_or_unscoped_profile_never_saves) ... ok
+test_exact_profile_without_summary_or_two_employers_saves (test_backfill.AutomaticPolicyTest.test_exact_profile_without_summary_or_two_employers_saves) ... ok
+test_incomplete_search_blocks_but_explicit_pairs_and_redirects_can_match (test_backfill.AutomaticPolicyTest.test_incomplete_search_blocks_but_explicit_pairs_and_redirects_can_match) ... ok
+test_model_does_not_override_deterministic_content_equality (test_backfill.AutomaticPolicyTest.test_model_does_not_override_deterministic_content_equality) ... ok
+test_name_and_rank_alone_never_save (test_backfill.AutomaticPolicyTest.test_name_and_rank_alone_never_save) ... ok
+test_same_name_different_content_does_not_block_exact_match (test_backfill.AutomaticPolicyTest.test_same_name_different_content_does_not_block_exact_match) ... ok
+test_styling_navigation_tokens_and_whitespace_are_ignored (test_backfill.AutomaticPolicyTest.test_styling_navigation_tokens_and_whitespace_are_ignored) ... ok
+test_unreadable_candidate_does_not_prevent_later_exact_match (test_backfill.AutomaticPolicyTest.test_unreadable_candidate_does_not_prevent_later_exact_match) ... ok
+test_automatic_preview_never_writes (test_backfill.AutomaticWorkflowTest.test_automatic_preview_never_writes) ... ok
+test_automatic_save_records_reason_without_match_prompts (test_backfill.AutomaticWorkflowTest.test_automatic_save_records_reason_without_match_prompts) ... ok
+test_database_conflict_is_not_reported_as_saved (test_backfill.AutomaticWorkflowTest.test_database_conflict_is_not_reported_as_saved) ... ok
+test_first_match_saves_then_moves_to_next_numeric_id (test_backfill.AutomaticWorkflowTest.test_first_match_saves_then_moves_to_next_numeric_id) ... ok
+test_uncertain_match_skips_without_prompt (test_backfill.AutomaticWorkflowTest.test_uncertain_match_skips_without_prompt) ... ok
+test_detail_target_can_read_live_numeric_profile_without_name_columns (test_backfill.LiveNumericTest.test_detail_target_can_read_live_numeric_profile_without_name_columns) ... ok
+test_direct_pair_does_not_claim_complete_name_search (test_backfill.LiveNumericTest.test_direct_pair_does_not_claim_complete_name_search) ... ok
+test_live_default_does_not_require_archived_html (test_backfill.LiveNumericTest.test_live_default_does_not_require_archived_html) ... ok
+test_numeric_route_and_redirect_validation (test_backfill.LiveNumericTest.test_numeric_route_and_redirect_validation) ... ok
+test_all_pages_collected (test_backfill.PaginationTest.test_all_pages_collected) ... ok
+test_different_names_filtered_after_all_pages (test_backfill.PaginationTest.test_different_names_filtered_after_all_pages) ... ok
+test_no_same_name_returns_no_profile_visits (test_backfill.PaginationTest.test_no_same_name_returns_no_profile_visits) ... ok
+test_repeated_page_never_complete (test_backfill.PaginationTest.test_repeated_page_never_complete) ... ok
+test_singular_matching_profile_is_recognized (test_backfill.PaginationTest.test_singular_matching_profile_is_recognized) ... ok
+test_truncated_search_never_complete (test_backfill.PaginationTest.test_truncated_search_never_complete) ... ok
+test_unreadable_name_blocks_search (test_backfill.PaginationTest.test_unreadable_name_blocks_search) ... ok
+test_zero_result_search_is_recognized (test_backfill.PaginationTest.test_zero_result_search_is_recognized) ... ok
+test_ambiguous_main_profiles_rejected (test_backfill.ProfilesTest.test_ambiguous_main_profiles_rejected) ... ok
+test_career_match_reviewable_not_automatic (test_backfill.ProfilesTest.test_career_match_reviewable_not_automatic) ... ok
+test_csv_deduplicates_numeric_ids (test_backfill.ProfilesTest.test_csv_deduplicates_numeric_ids) ... ok
+test_different_name_not_eligible (test_backfill.ProfilesTest.test_different_name_not_eligible) ... ok
+test_fingerprint_order_independent_and_changes_detected (test_backfill.ProfilesTest.test_fingerprint_order_independent_and_changes_detected) ... ok
+test_loading_profile_rejected (test_backfill.ProfilesTest.test_loading_profile_rejected) ... ok
+test_mapping_collision_guards (test_backfill.ProfilesTest.test_mapping_collision_guards) ... ok
+test_model_output_validation (test_backfill.ProfilesTest.test_model_output_validation) ... ok
+test_name_only_not_eligible (test_backfill.ProfilesTest.test_name_only_not_eligible) ... ok
+test_path_mapping_preserves_id_subfolder (test_backfill.ProfilesTest.test_path_mapping_preserves_id_subfolder) ... ok
+test_scopes_roles_and_ignores_recommendations (test_backfill.ProfilesTest.test_scopes_roles_and_ignores_recommendations) ... ok
+test_transaction_rolls_back_on_failure (test_backfill.ProfilesTest.test_transaction_rolls_back_on_failure) ... ok
+test_url_validation_and_token_exclusion (test_backfill.ProfilesTest.test_url_validation_and_token_exclusion) ... ok
+test_detail_rollback_restores_only_detail_uuid (test_detail_repository.DetailRepositoryTest.test_detail_rollback_restores_only_detail_uuid) ... ok
+test_failed_detail_update_rolls_back_mapping_and_audit (test_detail_repository.DetailRepositoryTest.test_failed_detail_update_rolls_back_mapping_and_audit) ... ok
+test_intervening_change_blocks_rollback (test_detail_repository.DetailRepositoryTest.test_intervening_change_blocks_rollback) ... ok
+test_nonblank_old_integer_link_not_overwritten (test_detail_repository.DetailRepositoryTest.test_nonblank_old_integer_link_not_overwritten) ... ok
+test_other_numeric_id_uuid_conflict (test_detail_repository.DetailRepositoryTest.test_other_numeric_id_uuid_conflict) ... ok
+test_pending_and_write_use_detail_columns_only (test_detail_repository.DetailRepositoryTest.test_pending_and_write_use_detail_columns_only) ... ok
+test_previous_plain_list_audit_rolls_back_old_main_table (test_detail_repository.DetailRepositoryTest.test_previous_plain_list_audit_rolls_back_old_main_table) ... ok
+
+----------------------------------------------------------------------
+Ran 47 tests in 0.028s
+
+OK
+Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
+Checked 2 result cards; up to 1 exact-name profiles to compare; skipped 1 different-name results.
+Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 different-name results.
+Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
+Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
+
+2026-09-09 content-match update: 47 offline tests passed.
+Supplied numeric/UUID HTML fixtures: identical normalized main Profile content;
+matching SHA-256: 2ceabdf31998284ec374c9729dce08316110780ff23ae53096f020d523379e6d.
+Tests cover changed descriptions/education/dates/skills/unknown sections, same-name
+competitors, exact matching without summaries, early stop and next numeric ID,
+no automatic Ollama calls/prompts, dry-run behavior, singular result counts,
+detail-only database writes, collisions, transactional failure and rollback.
+Seven repository tests use a SQLite adapter; actual MariaDB DDL and locking,
+SEEK browser sign-in/loading/search, and local Ollama were NOT tested here.
+No live database writes were made. Python syntax checks passed.
