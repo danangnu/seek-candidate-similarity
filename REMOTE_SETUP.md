@@ -65,7 +65,7 @@ in the configured database. The account needs CREATE for initialization and
 SELECT/INSERT/UPDATE/DELETE for mapping/audit operations, SELECT/UPDATE on the
 chosen target, and SELECT on `seek_scrap_settings`.
 
-The UUID destination remains `seek_scrap_detail.seek_scrap_id`, selected using
+The UUID destination remains `seek_scrap_detail.uuid`, selected using
 numeric `seekid_detail`. It must be a text column large enough for 36 characters.
 Existing nonblank values are preserved, including old numeric parent links.
 If the remote schema still uses this column as an integer relationship, coordinate

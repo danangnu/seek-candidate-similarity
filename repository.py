@@ -8,7 +8,7 @@ from network_config import database_options
 
 TARGETS = {
     'seek_scrap': {'pk': 'id_pk', 'numeric': 'id', 'uuid': 'uuid'},
-    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'seek_scrap_id'},
+    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'uuid'},
 }
 
 
@@ -130,20 +130,20 @@ class Repository:
             cur.execute('SELECT COUNT(*) AS n FROM information_schema.KEY_COLUMN_USAGE WHERE '
                         '(TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s AND REFERENCED_TABLE_NAME IS NOT NULL) OR '
                         '(REFERENCED_TABLE_SCHEMA=%s AND REFERENCED_TABLE_NAME=%s AND REFERENCED_COLUMN_NAME=%s)',
-                        (self.database,'seek_scrap_detail','seek_scrap_id',self.database,'seek_scrap_detail','seek_scrap_id'))
+                        (self.database,'seek_scrap_detail','uuid',self.database,'seek_scrap_detail','uuid'))
             if cur.fetchone()['n']:
-                raise ValueError('seek_scrap_id participates in a foreign key; schema needs explicit redesign before UUID storage')
+                raise ValueError('uuid participates in a foreign key; schema needs explicit redesign before UUID storage')
             cur.execute('SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS '
                         'WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s',
-                        (self.database,'seek_scrap_detail','seek_scrap_id'))
+                        (self.database,'seek_scrap_detail','uuid'))
             column=cur.fetchone()
             integer_types=('tinyint','smallint','mediumint','int','bigint')
             if column and (column['DATA_TYPE'].lower() in integer_types or
                            (column['DATA_TYPE'].lower() in ('char','varchar') and column['CHARACTER_MAXIMUM_LENGTH'] < 36)):
-                cur.execute('ALTER TABLE seek_scrap_detail MODIFY COLUMN seek_scrap_id VARCHAR(255) NULL DEFAULT NULL')
-                print('Changed seek_scrap_detail.seek_scrap_id to VARCHAR(255). Existing values were preserved.')
+                cur.execute('ALTER TABLE seek_scrap_detail MODIFY COLUMN uuid VARCHAR(255) NULL DEFAULT NULL')
+                print('Changed seek_scrap_detail.uuid to VARCHAR(255). Existing values were preserved.')
             elif not column or column['DATA_TYPE'].lower() not in ('char','varchar'):
-                raise ValueError('Unexpected seek_scrap_id data type; preparation stopped')
+                raise ValueError('Unexpected uuid data type; preparation stopped')
             # The uploaded table has a single-column unique key on seekid_detail.
             cur.execute('SELECT INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns_list '
                         'FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s '
@@ -155,7 +155,7 @@ class Repository:
             cur.execute('INSERT INTO seek_scrap_detail (seekid_detail) SELECT DISTINCT s.id FROM seek_scrap s '
                         'WHERE s.id > 0 AND NOT EXISTS (SELECT 1 FROM seek_scrap_detail d WHERE d.seekid_detail=s.id)')
             added=cur.rowcount
-            cur.execute("SELECT COUNT(*) AS n FROM seek_scrap_detail WHERE seek_scrap_id IS NOT NULL AND TRIM(seek_scrap_id)<>''")
+            cur.execute("SELECT COUNT(*) AS n FROM seek_scrap_detail WHERE uuid IS NOT NULL AND TRIM(uuid)<>''")
             preserved=cur.fetchone()['n']
         print('Prepared',added,'missing detail rows from the configured seek_scrap IDs; preserved',preserved,'nonblank target values.')
         print('Preparation does not copy UUIDs from seek_scrap or modify seek_scrap rows.')

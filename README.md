@@ -122,14 +122,14 @@ Keep the name-filter/browser changes when upgrading. Follow the destination
 update instructions below for the current required files and schema preparation.
 Stop the current run with Ctrl+C first. Existing saved mappings remain recorded.
 
-## Change of destination: seek_scrap_detail.seek_scrap_id
+## Change of destination: seek_scrap_detail.uuid
 
 The current default destination is now:
 
 | Purpose | Column |
 | --- | --- |
 | Numeric SEEK identity | `seek_scrap_detail.seekid_detail` |
-| UUID to save | `seek_scrap_detail.seek_scrap_id` |
+| UUID to save | `seek_scrap_detail.uuid` |
 | Detail row primary key | `seek_scrap_detail.id_detail` |
 
 UUID saves do not modify `seek_scrap.uuid`. `seek_scrap` is used only by the
@@ -155,7 +155,7 @@ rejected; table/column identifiers cannot be supplied as arbitrary SQL.
 
 ### Prepare the local table once
 
-Your uploaded schema has `seek_scrap_id INT`. A UUID needs a text column. Run:
+Your uploaded schema has `uuid INT`. A UUID needs a text column. Run:
 
 ```powershell
 python compare.py prepare-detail
@@ -163,7 +163,7 @@ python compare.py init-db
 ```
 
 `prepare-detail` acts on your explicitly configured database, including a remote database. It performs ALTER/INSERT operations; it is never run automatically. It requires the existing `seek_scrap_detail` and `seek_scrap` tables,
-checks for declared foreign-key relationships, and widens `seek_scrap_id` to
+checks for declared foreign-key relationships, and widens `uuid` to
 `VARCHAR(255)` when it is currently an integer or a short text column. It then
 adds only missing detail rows for distinct positive IDs in your local
 `seek_scrap` sample. New rows contain `seekid_detail`; other detail columns keep
@@ -171,7 +171,7 @@ their defaults. Existing detail rows and their matching metadata are preserved.
 It does not copy existing UUIDs from `seek_scrap` and does not alter `seek_scrap`.
 The preparation is repeatable: missing rows are added once.
 
-Existing nonblank `seek_scrap_id` values, including old numeric parent IDs, are
+Existing nonblank `uuid` values, including old numeric parent IDs, are
 preserved and excluded from ordinary pending runs. Do not clear them blindly.
 The earlier VB.NET importer used this column as an internal numeric parent-row
 link; repurposing it for UUIDs changes that meaning. Keep this schema change in
@@ -198,16 +198,16 @@ operation, with additional transaction/conflict/audit checks:
 
 ```sql
 UPDATE seek_scrap_detail
-SET seek_scrap_id = :matched_uuid
+SET uuid = :matched_uuid
 WHERE seekid_detail = :numeric_seek_id
-  AND (seek_scrap_id IS NULL OR TRIM(seek_scrap_id) = '');
+  AND (uuid IS NULL OR TRIM(uuid) = '');
 ```
 
 The colon names above describe parameters; the Python code binds actual values.
 To verify in local HeidiSQL:
 
 ```sql
-SELECT id_detail, seekid_detail, seek_scrap_id
+SELECT id_detail, seekid_detail, uuid
 FROM seek_uuid_test_trackitlive.seek_scrap_detail
 WHERE seekid_detail = 260138;
 ```
@@ -463,12 +463,12 @@ python compare.py run --id 464775 --apply --auto-save
 Then check local HeidiSQL:
 
 ```sql
-SELECT id_detail, seekid_detail, seek_scrap_id
+SELECT id_detail, seekid_detail, uuid
 FROM seek_uuid_test_trackitlive.seek_scrap_detail
 WHERE seekid_detail = 464775;
 ```
 
-The UUID is saved in `seek_scrap_id`; the legacy numeric ID remains in
+The UUID is saved in `uuid`; the legacy numeric ID remains in
 `seekid_detail`. Existing nonblank destination values are preserved. Once the
 single-record result is verified, run `--limit 5 --apply --auto-save`.
 
@@ -502,7 +502,7 @@ The database transaction uses the selected target table:
 - Rejects a UUID already linked to a different numeric ID or approved mapping.
 - Allows UUID-only rows with a NULL numeric identity; it does not assign them a numeric ID.
 - Adds an identity mapping and a detailed audit record with the original UUID values.
-- Updates only blank `seek_scrap_detail.seek_scrap_id` values where `seekid_detail` matches the numeric ID (or `seek_scrap.uuid` in explicit legacy-target mode).
+- Updates only blank `seek_scrap_detail.uuid` values where `seekid_detail` matches the numeric ID (or `seek_scrap.uuid` in explicit legacy-target mode).
 - Rolls everything back if any part fails.
 
 `seekid_detail`, `id_detail`, matching metadata, and other fields stay unchanged. The uploaded detail schema uniquely indexes `seekid_detail`; each legacy numeric ID normally has one detail row. The two new tables are `seek_candidate_identity_map` and `seek_uuid_backfill_audit`.
@@ -517,7 +517,7 @@ SELECT numeric_seek_id, profile_uuid, reviewed_by, reviewed_at
 FROM seek_candidate_identity_map
 ORDER BY reviewed_at DESC;
 
-SELECT id_detail, seekid_detail, seek_scrap_id
+SELECT id_detail, seekid_detail, uuid
 FROM seek_scrap_detail
 WHERE seekid_detail = 569702361
 ORDER BY id_detail;
