@@ -1,9 +1,10 @@
-"""Local-only test repository. Candidate IDs and all other candidate fields stay intact."""
+"""Configured MariaDB repository. Candidate IDs and all other candidate fields stay intact."""
 import hashlib
 import json
 import re
 from contextlib import contextmanager
 from profiles import canonical_uuid
+from network_config import database_options
 
 TARGETS = {
     'seek_scrap': {'pk': 'id_pk', 'numeric': 'id', 'uuid': 'uuid'},
@@ -58,22 +59,31 @@ def check_mapping(rows, other_rows, numeric_id, uid):
 class Repository:
     def __init__(self, config, password):
         import pymysql
-        if config['host'] not in ('127.0.0.1', 'localhost', '::1'):
-            raise ValueError('Local test build: database host must be loopback')
-        if not re.fullmatch(r'seek_uuid_test_[A-Za-z0-9_]+', config['database']):
-            raise ValueError('Local test build: database must start with seek_uuid_test_')
+        options = database_options(config, password)
+        self.require_tls = 'ssl' in options
         self.database = config['database']
         self.target_table = config.get('target_table', 'seek_scrap_detail')
         if self.target_table not in TARGETS:
             raise ValueError('target_table must be seek_scrap_detail or seek_scrap')
-        self.connection = pymysql.connect(host=config['host'], port=int(config.get('port', 3306)),
-            user=config['user'], password=password, database=self.database, charset='utf8mb4',
-            autocommit=True, cursorclass=pymysql.cursors.DictCursor, connect_timeout=10,
-            read_timeout=60, write_timeout=60)
+        self.connection = pymysql.connect(**options, cursorclass=pymysql.cursors.DictCursor)
+        try:
+            self.verify_connection()
+            self.preflight([self.target_table], check_type=False)
+        except Exception:
+            self.connection.close()
+            raise
+
+    def verify_connection(self):
         with self.connection.cursor() as cur:
             cur.execute('SELECT DATABASE() AS db, @@hostname AS hostname, @@port AS port')
             self.server = cur.fetchone()
-        self.preflight([self.target_table], check_type=False)
+            if not self.server or self.server['db'] != self.database:
+                raise ValueError('Connected database differs from the configured database')
+            if self.require_tls:
+                cur.execute("SHOW SESSION STATUS LIKE 'Ssl_cipher'")
+                tls = cur.fetchone()
+                if not tls or not tls.get('Value'):
+                    raise ValueError('MariaDB TLS was requested but the server did not establish an encrypted session')
 
     def scrap_idle_settings(self, settings_id=1):
         from runtime_breaks import BreakSettingsError
@@ -81,13 +91,14 @@ class Repository:
             raise BreakSettingsError('breaks.settings_id must be a positive integer.')
         # Called outside candidate write transactions; long pauses can expire a connection.
         self.connection.ping(reconnect=True)
+        self.verify_connection()
         with self.connection.cursor() as cur:
             cur.execute('SELECT idle_less_than, idle_less_than2, idle_more_than, idle_more_than2 '
                         'FROM seek_scrap_settings WHERE id=%s', (settings_id,))
             row = cur.fetchone()
         if row is None:
-            raise BreakSettingsError('No local seek_scrap_settings row with id='+str(settings_id)+
-                                     '. Run setup_local_scrap_settings.sql or set breaks.settings_id.')
+            raise BreakSettingsError('No seek_scrap_settings row with id='+str(settings_id)+
+                                     '. Check the selected database and breaks.settings_id. The bundled setup SQL is only for the local test copy.')
         return row
 
     def preflight(self, tables, check_type=True, target_table=None):
@@ -110,7 +121,7 @@ class Repository:
                                      'For the uploaded detail schema run: python compare.py prepare-detail')
 
     def prepare_detail(self):
-        """Explicit local-only preparation; DDL is separate from mapping transactions."""
+        """Explicit preparation of the configured database; DDL is separate from mapping transactions."""
         if self.target_table != 'seek_scrap_detail':
             raise ValueError('prepare-detail requires database.target_table = seek_scrap_detail')
         self.preflight(['seek_scrap_detail', 'seek_scrap'], check_type=False)
@@ -130,7 +141,7 @@ class Repository:
             if column and (column['DATA_TYPE'].lower() in integer_types or
                            (column['DATA_TYPE'].lower() in ('char','varchar') and column['CHARACTER_MAXIMUM_LENGTH'] < 36)):
                 cur.execute('ALTER TABLE seek_scrap_detail MODIFY COLUMN seek_scrap_id VARCHAR(255) NULL DEFAULT NULL')
-                print('Changed local seek_scrap_detail.seek_scrap_id to VARCHAR(255). Existing values were preserved.')
+                print('Changed seek_scrap_detail.seek_scrap_id to VARCHAR(255). Existing values were preserved.')
             elif not column or column['DATA_TYPE'].lower() not in ('char','varchar'):
                 raise ValueError('Unexpected seek_scrap_id data type; preparation stopped')
             # The uploaded table has a single-column unique key on seekid_detail.
@@ -146,7 +157,7 @@ class Repository:
             added=cur.rowcount
             cur.execute("SELECT COUNT(*) AS n FROM seek_scrap_detail WHERE seek_scrap_id IS NOT NULL AND TRIM(seek_scrap_id)<>''")
             preserved=cur.fetchone()['n']
-        print('Prepared',added,'missing detail rows from local seek_scrap IDs; preserved',preserved,'nonblank target values.')
+        print('Prepared',added,'missing detail rows from the configured seek_scrap IDs; preserved',preserved,'nonblank target values.')
         print('Preparation does not copy UUIDs from seek_scrap or modify seek_scrap rows.')
 
     def initialize(self):

@@ -8,7 +8,8 @@ from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 from profiles import extract_candidate_profile, read_html, compare_evidence, compare_profiles_with_ollama, norm, canonical_uuid, automatic_match_decision
 from repository import Repository, blank, fingerprint
-from runtime_breaks import RuntimeBreaks, BreakSettingsError
+from runtime_breaks import RuntimeBreaks, BreakSettingsError, validate_settings
+from network_config import ollama_options, check_ollama
 
 
 def resolve_file(value, config):
@@ -68,8 +69,10 @@ def write_report(folder, numeric_id, report):
 
 def run(args, config, repo):
     from seek_browser import SeekBrowser
+    use_ollama = not args.no_ollama and (not getattr(args, 'auto_save', False) or getattr(args, 'with_ollama', False))
     if getattr(args, 'auto_save', False):
-        print('Automatic policy: first_identical_profile_content_v2 (first exact content match; no Ollama call)')
+        print('Automatic policy: first_identical_profile_content_v2 (first exact content match)')
+    print('Ollama advisory:', 'enabled' if use_ollama else 'disabled')
     if args.apply:
         repo.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])
     source_mode = config.get('source_mode', 'live_numeric')
@@ -87,11 +90,11 @@ def run(args, config, repo):
     try:
         for numeric_id in ids:
             report = {'numeric_seek_id': numeric_id, 'database': repo.database,
-                      'target_table': repo.target_table, 'status': 'unresolved'}
+                      'target_table': repo.target_table, 'database_host': config.get('database', {}).get('host'), 'status': 'unresolved'}
             try:
                 rows = repo.rows(numeric_id)
                 if not rows:
-                    raise ValueError('Numeric ID is not present in local '+repo.target_table+'; use prepare-detail to seed missing local detail rows')
+                    raise ValueError('Numeric ID is not present in the configured '+repo.target_table+'; check the selected database and candidate sample')
                 if not any(blank(r['uuid']) for r in rows):
                     report['status'] = 'already_mapped'
                     write_report(folder, numeric_id, report)
@@ -106,7 +109,7 @@ def run(args, config, repo):
                 breaks.refresh()
                 rows = repo.rows(numeric_id)
                 if not rows:
-                    raise ValueError('Numeric ID disappeared from the local target during the break')
+                    raise ValueError('Numeric ID disappeared from the configured target during the break')
                 if not any(blank(r['uuid']) for r in rows):
                     report['status'] = 'already_mapped'
                     write_report(folder, numeric_id, report)
@@ -157,11 +160,10 @@ def run(args, config, repo):
                             raise ValueError('Candidate name changed between search card and full profile; rerun the search')
                         candidate['profile'] = profile
                         candidate['evidence'] = compare_evidence(old, profile)
-                        if not args.no_ollama and not getattr(args, 'auto_save', False):
+                        if use_ollama:
                             try:
                                 candidate['ollama'] = compare_profiles_with_ollama(old, profile,
-                                    config.get('ollama', {}).get('model', 'llama3.1:8b'),
-                                    config.get('ollama', {}).get('endpoint', 'http://127.0.0.1:11434'))
+                                    **ollama_options(config.get('ollama', {})))
                             except Exception as ex:
                                 candidate['ollama_error'] = type(ex).__name__
                         print('  Compared', uid, '| rank', candidate['evidence']['rank'],
@@ -276,17 +278,43 @@ def run(args, config, repo):
     print('Reports:', folder.resolve())
 
 
+def check_connections(config, repo, no_ollama=False):
+    failures = []
+    checks = [
+        ('UUID column and target table', lambda: repo.preflight([repo.target_table])),
+        ('Mapping and audit tables', lambda: repo.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])),
+        ('Runtime break settings', lambda: validate_settings(repo.scrap_idle_settings(config.get('breaks', {}).get('settings_id', 1))))]
+    if not no_ollama:
+        checks.append(('Ollama endpoint and model', lambda: check_ollama(**ollama_options(config.get('ollama', {})))))
+    for label, action in checks:
+        try:
+            action()
+            print('OK:', label)
+        except Exception as ex:
+            # Driver/HTTP exception strings may contain authentication data.
+            reason = str(ex) if isinstance(ex, (ValueError, BreakSettingsError)) else type(ex).__name__
+            print('FAILED:', label, '|', reason)
+            failures.append(label)
+    print('Connection check complete. No Chrome session, candidate payload, or database writes.')
+    if failures:
+        raise ValueError('Connection checks failed: '+', '.join(failures))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='config.json')
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('init-db', help='Create the two local mapping/audit tables')
-    sub.add_parser('prepare-detail', help='Prepare local detail UUID column and seed missing numeric IDs from local seek_scrap')
+    sub.add_parser('init-db', help='Create mapping/audit tables in the configured database')
+    sub.add_parser('prepare-detail', help='Alter the configured detail UUID column and seed missing numeric IDs from seek_scrap')
+    check = sub.add_parser('check-connections', help='Read-only database/schema/settings and Ollama-model checks; no Chrome or writes')
+    check.add_argument('--no-ollama', action='store_true')
     runner = sub.add_parser('run', help='Browse and compare; dry run unless --apply')
     runner.add_argument('--apply', action='store_true')
     runner.add_argument('--auto-save', action='store_true',
                         help='Stop at the first identical full Profile-content match; add --apply to save')
-    runner.add_argument('--no-ollama', action='store_true')
+    ai_flags = runner.add_mutually_exclusive_group()
+    ai_flags.add_argument('--no-ollama', action='store_true')
+    ai_flags.add_argument('--with-ollama', action='store_true', help='Also request an advisory Ollama comparison in auto-save mode')
     runner.add_argument('--limit', type=int, default=5)
     runner.add_argument('--uuid', help='Compare this UUID directly; requires --id')
     group = runner.add_mutually_exclusive_group()
@@ -303,7 +331,8 @@ def main():
         new = extract_candidate_profile(read_html(args.new_html)[0])
         result = {'old_profile': old, 'new_profile': new, 'evidence': compare_evidence(old, new)}
         if not args.no_ollama:
-            result['ollama'] = compare_profiles_with_ollama(old, new)
+            file_config = json.loads(Path(args.config).read_text(encoding='utf-8-sig')) if Path(args.config).exists() else {}
+            result['ollama'] = compare_profiles_with_ollama(old, new, **ollama_options(file_config.get('ollama', {})))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     config = json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
@@ -317,12 +346,14 @@ def main():
         args.uuid = canonical_uuid(args.uuid)
     password = os.environ.get('SEEK_DB_PASSWORD')
     if password is None:
-        password = getpass.getpass('Local MariaDB password: ')
+        password = getpass.getpass('MariaDB password: ')
     repo = Repository(config['database'], password)
     try:
-        print('Connected:', config['database']['host'], repo.server['port'], repo.database,
-              '| server hostname:', repo.server['hostname'], '| target:', repo.target_table)
-        if args.command == 'prepare-detail':
+        print('Connected:', config['database']['host'], config['database'].get('port', 3306), repo.database,
+              '| server hostname:', repo.server['hostname'], '| server port:', repo.server['port'], '| target:', repo.target_table)
+        if args.command == 'check-connections':
+            check_connections(config, repo, no_ollama=args.no_ollama)
+        elif args.command == 'prepare-detail':
             repo.prepare_detail()
         elif args.command == 'init-db':
             repo.initialize(); print('Mapping and audit tables ready.')
@@ -343,5 +374,5 @@ if __name__ == '__main__':
     except Exception as error:
         print('Stopped:', str(error) if isinstance(error, (ValueError, BreakSettingsError)) else type(error).__name__)
         if error.args and type(error.args[0]) is int:
-            print('Database error code:', error.args[0], '(check local credentials, permissions and schema)')
+            print('Database error code:', error.args[0], '(check configured credentials, permissions and schema)')
         raise SystemExit(1)

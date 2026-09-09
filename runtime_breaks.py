@@ -1,4 +1,4 @@
-"""Per-run, per-reviewer breaks using the selected local SEEK settings row."""
+"""Per-run, per-reviewer breaks using the configured SEEK settings row."""
 import random
 import time
 
@@ -47,15 +47,15 @@ class RuntimeBreaks:
             raise
         except Exception as ex:
             # Never print database error text (it could contain connection details).
-            raise BreakSettingsError('Cannot read local seek_scrap_settings ('+type(ex).__name__+
-                '). Run setup_local_scrap_settings.sql in your local test database and check SELECT permission.') from None
+            raise BreakSettingsError('Cannot read seek_scrap_settings ('+type(ex).__name__+
+                '). Check the configured database and SELECT permission. setup_local_scrap_settings.sql is only for the local test copy.') from None
         return self.settings
 
     def start(self):
         # Start only after manual sign-in. Repeated calls do not reset the clock.
         if self.started_at is None:
             self.started_at = self.clock()
-            self.emit(f'Runtime breaks started for {self.reviewer}; local seek_scrap_settings id={self.settings_id}. '
+            self.emit(f'Runtime breaks started for {self.reviewer}; seek_scrap_settings id={self.settings_id}. '
                       f'Under 1 hour: {self.settings["idle_less_than"]}–{self.settings["idle_less_than2"]} seconds; '
                       f'at/after 1 hour: {self.settings["idle_more_than"]}–{self.settings["idle_more_than2"]} minutes.')
 

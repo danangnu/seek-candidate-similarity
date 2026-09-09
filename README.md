@@ -2,19 +2,19 @@
 
 This extends your two-file Python comparison script into a visible Chrome workflow:
 
-1. Read pending numeric SEEK IDs from **local `seek_scrap_detail.seekid_detail`**.
+1. Read pending numeric SEEK IDs from **configured `seek_scrap_detail.seekid_detail`**.
 2. Open SEEK and let you sign in, including any verification.
 3. Open `https://au.employer.seek.com/talentsearch/profiles/<numeric-id>` and read the live numeric-ID profile.
 4. Search Talent Search using that candidate's name and follow the result pages.
 5. Check names on every result card, then open only exact-name UUID profiles and compare their details with the live numeric-ID profile.
-6. Show evidence and an optional local Ollama opinion.
+6. Show evidence and an optional configured Ollama opinion.
 7. Save confirmed matches manually, or use `--auto-save --apply` to save the first identical complete Profile-content match without candidate-selection prompts.
 
-The program is separate from the VB.NET application. It does not use `DllConnection`, `SQLSetting.ini`, TrackIt login tables, the shared LIVE configuration, or the VB application's browser. Database access is explicitly limited to localhost and a `seek_uuid_test_...` database in this version.
+The program is separate from the VB.NET application. It does not use `DllConnection`, `SQLSetting.ini`, TrackIt login tables, the shared LIVE configuration, or the VB application's browser. Database access uses the explicitly configured host, port, user and database. Local and remote servers are supported. See [REMOTE_SETUP.md](REMOTE_SETUP.md) for remote configuration and read-only connection checks.
 
-## Breaks from local seek_scrap_settings (September 9 update)
+## Breaks from seek_scrap_settings (September 9 update)
 
-The Python scraper now reads `seek_scrap_settings` through the SAME local
+The Python scraper reads `seek_scrap_settings` through the SAME configured
 connection as the candidate tables. The default settings row is `id=1`.
 Only `idle_less_than`, `idle_less_than2`, `idle_more_than` and `idle_more_than2`
 are read; `updated_by` is the settings editor, not the current running user.
@@ -43,7 +43,7 @@ running time across processes, PCs, the VB application or earlier runs.
 Range endpoints are inclusive. Both zero endpoints mean no additional break
 for that phase. Missing, NULL, negative, non-integer or reversed settings stop
 the run with an explanation rather than silently using a different delay.
-Values refresh from the local table at each candidate boundary. The current
+Values refresh from the configured table at each candidate boundary. The current
 wait finishes at the duration already selected if settings change mid-break.
 Console countdowns appear once a minute during long waits; Ctrl+C stops promptly.
 Breaks occur outside database write transactions. The database connection is
@@ -52,8 +52,8 @@ refreshed outside those transactions after a long pause.
 ### Install this update
 
 1. Stop the current run with Ctrl+C.
-2. Replace `compare.py` and `repository.py`; add the new `runtime_breaks.py`.
-   Alternatively copy all five application Python files from this ZIP. Keep your
+2. Copy all six application Python files from this ZIP, including
+   `runtime_breaks.py` and `network_config.py`. Keep your
    existing `config.json` and existing saved reports.
 3. In LOCAL HeidiSQL, open and execute `setup_local_scrap_settings.sql` from this
    ZIP once. It selects `seek_uuid_test_trackitlive`, preserves an existing table
@@ -83,9 +83,9 @@ FROM seek_uuid_test_trackitlive.seek_scrap_settings
 WHERE id = 1;
 ```
 
-The connected local database account needs SELECT permission on this table;
-setup additionally needs CREATE and INSERT. No live database connection is
-introduced by this update. UUID target and exact-content matching are unchanged.
+The connected database account needs SELECT permission on this table;
+setup additionally needs CREATE and INSERT. The example below remains local; remote connections are explicitly configured
+using REMOTE_SETUP.md. UUID target and exact-content matching are unchanged.
 Each report and saved mapping's audit evidence includes `runtime_break` with
 the reviewer, elapsed time, chosen duration and settings used.
 
@@ -114,8 +114,9 @@ Console progress now reports cards checked, profiles selected and different-name
 cards skipped. The report and audit include the search-card names and UUIDs
 (without token-bearing links) under `search_scan`. The original 10-second delays
 remain; fewer profile visits provide the speed improvement. Automatic mode uses
-deterministic content equality and does not call Ollama. Manual comparison can
-still obtain its advisory opinion.
+deterministic content equality and skips Ollama by default. Add `--with-ollama`
+to also request advice during automatic runs. Manual comparison requests advice
+unless `--no-ollama` is specified; AI advice never substitutes for exact content.
 
 Keep the name-filter/browser changes when upgrading. Follow the destination
 update instructions below for the current required files and schema preparation.
@@ -140,8 +141,8 @@ saved HTML files.
 
 ### Update your existing installation
 
-Stop the program. Replace ALL FIVE application files from this ZIP:
-`compare.py`, `profiles.py`, `seek_browser.py`, `repository.py` and `runtime_breaks.py`. Keep your
+Stop the program. Replace ALL SIX application files from this ZIP:
+`compare.py`, `profiles.py`, `seek_browser.py`, `repository.py`, `runtime_breaks.py` and `network_config.py`. Keep your
 own `config.json`, and add this field INSIDE its `database` object:
 
 ```json
@@ -161,8 +162,7 @@ python compare.py prepare-detail
 python compare.py init-db
 ```
 
-`prepare-detail` is restricted to your configured localhost `seek_uuid_test_...`
-database. It requires the existing `seek_scrap_detail` and `seek_scrap` tables,
+`prepare-detail` acts on your explicitly configured database, including a remote database. It performs ALTER/INSERT operations; it is never run automatically. It requires the existing `seek_scrap_detail` and `seek_scrap` tables,
 checks for declared foreign-key relationships, and widens `seek_scrap_id` to
 `VARCHAR(255)` when it is currently an integer or a short text column. It then
 adds only missing detail rows for distinct positive IDs in your local
@@ -228,7 +228,7 @@ Copy-Item config.example.json config.json
 
 Use Python 3.10 or newer. Chrome must be installed. The normal browser startup uses Selenium Manager to find a compatible ChromeDriver. If your PC cannot download drivers, set `browser.chromedriver` to the full path of a driver that matches your Chrome version. Do not reuse the old Chrome 150 driver with Chrome 152.
 
-## 2. Configure MariaDB and baseline profiles
+## 2. Configure MariaDB and baseline profiles (local example)
 
 Edit `config.json`:
 
@@ -240,7 +240,7 @@ Edit `config.json`:
 
 The program prompts for the MariaDB password without displaying it. Optionally supply it through `SEEK_DB_PASSWORD` in the process environment. Do not put it into the JSON file or a command-line argument.
 
-**The numeric IDs must exist in your selected local target table.** Creating the seven empty tables is not enough. If you have only the earlier `seek_scrap` sample, run `prepare-detail` to create the missing local detail rows. The CSV option only selects numeric IDs; it does not insert candidate rows or change file paths in MariaDB.
+**The numeric IDs must exist in your configured target table (local or remote).** Creating the seven empty tables is not enough. If you have only the earlier `seek_scrap` sample, run `prepare-detail` to create the missing local detail rows. The CSV option only selects numeric IDs; it does not insert candidate rows or change file paths in MariaDB.
 
 Your CSV had 1,000 snapshots covering 285 distinct numeric SEEK IDs. It uses Windows text encoding; the CSV filter supports UTF-8 and Windows-1252 and deduplicates IDs.
 
@@ -272,7 +272,7 @@ python compare.py run --id 12345678 --uuid 11111111-1111-1111-1111-111111111111
 ```
 
 Replace BOTH example IDs with the numeric ID and UUID from your two links.
-The numeric ID must be in the selected local target table. No name search is performed in this
+The numeric ID must be in the selected configured target table. No name search is performed in this
 mode, and the report says `direct_pair`. Add `--apply` for normal reviewed-save
 prompts, or `--apply --auto-save` to save only if the complete normalized Profile
 content is identical. Without `--uuid`, the tool searches by the name
@@ -319,7 +319,7 @@ against account restrictions. If SEEK displays a rate-limit, verification or
 account-restriction message, stop the run and follow SEEK's instructions. This
 version does not implement automatic block detection or Retry-After handling.
 
-## 3. Configure Ollama
+## 3. Configure Ollama (local example; remote instructions in REMOTE_SETUP.md)
 
 Use your installed Ollama application and a local model:
 
@@ -357,7 +357,7 @@ Reports are written under `reports/<run-id>/<numeric-id>.json`. Each contains th
 .\.venv\Scripts\python.exe compare.py run --csv "C:\path\09(2).csv" --limit 5
 ```
 
-Only IDs both present in the CSV and pending in the selected local target table are processed. With no CSV, all pending local numeric IDs are eligible. Already-filled IDs are excluded from subsequent ordinary/CSV runs. Unresolved IDs remain pending; use `--id` to investigate a particular record.
+Only IDs both present in the CSV and pending in the selected configured target table are processed. With no CSV, all pending numeric IDs are eligible. Already-filled IDs are excluded from subsequent ordinary/CSV runs. Unresolved IDs remain pending; use `--id` to investigate a particular record.
 
 ## Automatic saving: no candidate number, reason or confirmation prompts
 
@@ -453,7 +453,7 @@ or access restricted content; it compares the Profile content present in the DOM
 
 ## Quick test of the updated matching rule
 
-Keep your local database configuration and ten-second delay, replace the five
+Keep your local database configuration and ten-second delay, replace the six
 Python files, and run:
 
 ```powershell
@@ -495,7 +495,7 @@ For each numeric ID:
 
 In manual mode, all writes require review, even when the top rank is high. Same-name-only matches are blocked. This first version permits review for an exact normalized name plus at least one shared employer/job-title pair, or a substantial identical summary. That is a minimum review gate, not proof. Multiple plausible people should be skipped. Name variations requiring an override are not supported in this version.
 
-The local database transaction uses the selected target table:
+The database transaction uses the selected target table:
 
 - Rechecks the original row fingerprint to detect changes since comparison.
 - Rejects a numeric ID with a different nonblank UUID.
@@ -557,7 +557,7 @@ The original two-file comparison is still available, without importing code trig
 
 Supply your own existing `seekid.txt` and `uuid.txt`; candidate HTML and database exports are not bundled in this code package.
 
-Validation performed here: 60 automated offline tests, Python syntax checks, extraction against both supplied comparison profiles and the earlier full-profile capture. Seven repository tests execute target updates and rollback through a SQLite adapter; they do not validate MariaDB-specific DDL or locking. Tests cover detail-only writes, preservation of old numeric values, transaction failure, collision checks and rollback of older main-table audit records. The supplied numeric/UUID HTML pair produced identical normalized full Profile content and matching hashes. Both comparison profiles yielded four career entries with job titles, two education entries and eight licence/certification entries. The separate CV-tab capture correctly failed the full-profile readiness check.
+Validation performed here: 75 automated tests (offline/fake services), Python syntax checks, extraction against both supplied comparison profiles and the earlier full-profile capture. Seven repository tests execute target updates and rollback through a SQLite adapter; they do not validate MariaDB-specific DDL or locking. Tests cover detail-only writes, preservation of old numeric values, transaction failure, collision checks and rollback of older main-table audit records. The supplied numeric/UUID HTML pair produced identical normalized full Profile content and matching hashes. Both comparison profiles yielded four career entries with job titles, two education entries and eight licence/certification entries. The separate CV-tab capture correctly failed the full-profile readiness check.
 
 **Not tested here:** actual SEEK sign-in/search, a running local Ollama model, or live MariaDB writes/rollback. Start with one candidate in the local test database and verify the saved rows and rollback before a larger batch. No production writes were performed.
 
@@ -566,7 +566,9 @@ Validation performed here: 60 automated offline tests, Python syntax checks, ext
 - `compare.py`: command-line workflow, live/archived source selection, review and reports.
 - `profiles.py`: HTML extraction, UUID validation, matching evidence and Ollama API.
 - `seek_browser.py`: visible Chrome sign-in, numeric/UUID profiles, name search, pagination and pauses.
-- `repository.py`: local-only database connection, settings reads, mapping transaction and rollback.
+- `repository.py`: configured local/remote database connection, settings reads, mapping transaction and rollback.
+- `network_config.py`: connection validation, verified TLS options, Ollama transport and model checks.
+- `config.remote.example.json`, `REMOTE_SETUP.md`: remote setup and commands.
 - `runtime_breaks.py`: reviewer/run timer and database-driven random breaks.
 - `setup_local_scrap_settings.sql`: local table and settings preparation.
 - `config.example.json`, `requirements.txt`: setup.

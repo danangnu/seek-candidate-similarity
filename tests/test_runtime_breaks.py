@@ -124,6 +124,7 @@ class RuntimeBreakTest(unittest.TestCase):
 
     def test_repository_reads_only_four_settings_from_local_connection(self):
         repo=Repository.__new__(Repository)
+        repo.verify_connection=Mock()
         repo.connection=Mock()
         cur=Mock();cur.fetchone.return_value=dict(SETTINGS)
         context=Mock();context.__enter__=Mock(return_value=cur);context.__exit__=Mock(return_value=False)

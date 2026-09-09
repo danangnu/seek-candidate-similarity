@@ -5,3 +5,12 @@ reports/
 *.txt
 !requirements.txt
 !VALIDATION.txt
+
+venv/
+config.*.json
+!config.example.json
+!config.remote.example.json
+.env
+.env.*
+*.pem
+*.key

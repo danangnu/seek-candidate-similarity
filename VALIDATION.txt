@@ -45,6 +45,21 @@ test_nonblank_old_integer_link_not_overwritten (test_detail_repository.DetailRep
 test_other_numeric_id_uuid_conflict (test_detail_repository.DetailRepositoryTest.test_other_numeric_id_uuid_conflict) ... ok
 test_pending_and_write_use_detail_columns_only (test_detail_repository.DetailRepositoryTest.test_pending_and_write_use_detail_columns_only) ... ok
 test_previous_plain_list_audit_rolls_back_old_main_table (test_detail_repository.DetailRepositoryTest.test_previous_plain_list_audit_rolls_back_old_main_table) ... ok
+test_gateway_key_requires_https (test_remote_connections.OllamaHTTPTest.test_gateway_key_requires_https) ... ok
+test_missing_model_rejected (test_remote_connections.OllamaHTTPTest.test_missing_model_rejected) ... ok
+test_model_check_sends_get_without_candidate_data (test_remote_connections.OllamaHTTPTest.test_model_check_sends_get_without_candidate_data) ... ok
+test_optional_gateway_key_is_header_only (test_remote_connections.OllamaHTTPTest.test_optional_gateway_key_is_header_only) ... ok
+test_profile_post_and_model_verdict_roundtrip (test_remote_connections.OllamaHTTPTest.test_profile_post_and_model_verdict_roundtrip) ... ok
+test_redirect_does_not_forward_profile_payload (test_remote_connections.OllamaHTTPTest.test_redirect_does_not_forward_profile_payload) ... ok
+test_remote_url_and_ipv6_allowed_but_embedded_secrets_rejected (test_remote_connections.OllamaHTTPTest.test_remote_url_and_ipv6_allowed_but_embedded_secrets_rejected) ... ok
+test_invalid_host_port_and_timeout_rejected (test_remote_connections.RemoteDatabaseTest.test_invalid_host_port_and_timeout_rejected) ... ok
+test_remote_host_database_port_and_password_are_passed_through (test_remote_connections.RemoteDatabaseTest.test_remote_host_database_port_and_password_are_passed_through) ... ok
+test_tls_context_verifies_certificate_and_hostname (test_remote_connections.RemoteDatabaseTest.test_tls_context_verifies_certificate_and_hostname) ... ok
+test_tls_not_silently_disabled_when_certificates_configured (test_remote_connections.RemoteDatabaseTest.test_tls_not_silently_disabled_when_certificates_configured) ... ok
+test_wrong_database_or_missing_required_tls_is_rejected (test_remote_connections.RemoteDatabaseTest.test_wrong_database_or_missing_required_tls_is_rejected) ... ok
+test_check_connections_never_mutates_database_or_opens_browser (test_remote_connections.RemoteWorkflowTest.test_check_connections_never_mutates_database_or_opens_browser) ... ok
+test_database_schema_failure_does_not_skip_ollama_diagnostic (test_remote_connections.RemoteWorkflowTest.test_database_schema_failure_does_not_skip_ollama_diagnostic) ... ok
+test_explicit_ollama_advice_does_not_override_exact_content_save (test_remote_connections.RemoteWorkflowTest.test_explicit_ollama_advice_does_not_override_exact_content_save) ... ok
 test_database_error_has_no_raw_connection_details (test_runtime_breaks.RuntimeBreakTest.test_database_error_has_no_raw_connection_details) ... ok
 test_each_running_user_has_independent_timer (test_runtime_breaks.RuntimeBreakTest.test_each_running_user_has_independent_timer) ... ok
 test_exactly_one_hour_and_later_use_minutes (test_runtime_breaks.RuntimeBreakTest.test_exactly_one_hour_and_later_use_minutes) ... ok
@@ -60,7 +75,7 @@ test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.R
 test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
 
 ----------------------------------------------------------------------
-Ran 60 tests in 0.042s
+Ran 75 tests in 0.563s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -69,14 +84,16 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-2026-09-09 runtime breaks update: 60 offline tests passed.
-Thirteen new tests use a fake monotonic clock, fake sleeps and mocked database
-reads; no real 1-hour wait was necessary. Boundaries at 3,599 / 3,600 / 3,601
-seconds, inclusive random ranges, seconds/minutes conversion, long-break
-continuation, per-run reviewer isolation, settings refresh, invalid settings,
-zero ranges, Ctrl+C and connection refresh were checked.
-Seven repository tests use a SQLite adapter for UUID writes and rollback.
-Actual MariaDB DDL, network idle timeouts, SEEK sign-in/search and real timed
-production sessions were NOT tested here. No live database writes were made.
-Profile content matching and detail UUID destination remain unchanged.
-Python syntax and configuration JSON checks passed.
+2026-09-09 remote connections update: 75 tests passed.
+Remote database options, explicit database selection, TLS verification guards,
+Ollama URL/token handling, redirect rejection and read-only connection checks
+were tested. HTTP request/response tests used a real loopback fixture server;
+remote DNS, TLS and database calls were mocked. Seven repository tests use a
+SQLite adapter to exercise transaction writes and rollback. Runtime breaks use
+a fake monotonic clock and fake sleeps; one-hour boundaries were tested without
+an actual one-hour wait. Exact-content matching and first-match saving remain
+covered. Python syntax and example JSON configuration validation passed.
+
+NOT tested here: actual remote MariaDB/TLS handshakes, a running Ollama model,
+SEEK sign-in/search, MariaDB DDL or live production writes/rollback. No actual
+remote database or Ollama addresses/credentials were supplied or contacted.
