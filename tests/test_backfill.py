@@ -202,7 +202,7 @@ class LiveNumericTest(unittest.TestCase):
         from unittest.mock import patch
         from compare import run
         profile=extract_candidate_profile(FIXTURE)
-        repo=Mock(); repo.database='seek_uuid_test_unit'; repo.target_table='seek_scrap'; repo.ids.return_value=[42]
+        repo=Mock(); repo.database='seek_uuid_test_unit'; repo.target_table='seek_scrap'; repo.iter_ids.return_value=[42]
         repo.rows.return_value=[{'id_pk':1,'id':42,'uuid':None,'name':'Alex Example',
                                  'file':'nonexistent-archived-file.txt','scrap_date':None}]
         if detail:
@@ -337,7 +337,7 @@ class AutomaticWorkflowTest(unittest.TestCase):
         from unittest.mock import patch
         from compare import run
         profile=strong_profile() if strong else extract_candidate_profile(FIXTURE)
-        repo=Mock();repo.database='seek_uuid_test_unit'; repo.target_table='seek_scrap_detail';repo.ids.return_value=[42,43] if batch else [42]
+        repo=Mock();repo.database='seek_uuid_test_unit'; repo.target_table='seek_scrap_detail';repo.iter_ids.return_value=[42,43] if batch else [42]
         repo.rows.return_value=[{'id_pk':1,'id':42,'uuid':None,'name':'Alex Example','file':'','scrap_date':None}]
         repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}
         if conflict:repo.submit_proposal.side_effect=ValueError('Conflicting approved identity mapping')

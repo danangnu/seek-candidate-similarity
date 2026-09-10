@@ -82,12 +82,13 @@ def run(args, config, repo):
         raise ValueError('source_mode must be live_numeric or saved_html')
     if repo.target_table == 'seek_scrap_detail' and source_mode != 'live_numeric':
         raise ValueError('The detail target requires source_mode live_numeric; it has no name or saved HTML columns')
-    pending = repo.ids()  # Preserve database order: most recently updated profiles first.
+    from itertools import chain, islice
     csv_selection = set(csv_ids(args.csv)) if args.csv else None
-    ids = [args.id] if args.id else [i for i in pending if csv_selection is None or i in csv_selection]
-    ids = ids[:args.limit]
+    queue = iter([args.id]) if args.id else iter(repo.iter_ids(limit=args.limit, candidate_ids=csv_selection))
+    first_id = next(queue, None)
+    ids = chain([first_id], islice(queue, args.limit-1)) if first_id is not None else ()
     breaks = RuntimeBreaks(created_by, repo.scrap_idle_settings,
-                           config.get('breaks', {}).get('settings_id', 1)) if ids else None
+                           config.get('breaks', {}).get('settings_id', 1)) if first_id is not None else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
     try:
@@ -283,6 +284,9 @@ def main():
     sub.add_parser('init-db', help='Create review queue/history tables only in the configured database')
     check = sub.add_parser('check-connections', help='Read-only database/schema/settings and Ollama-model checks; no Chrome or writes')
     check.add_argument('--no-ollama', action='store_true')
+    queue_check = sub.add_parser('check-queue', help='Read-only queue timing and optional EXPLAIN; no browser or writes')
+    queue_check.add_argument('--limit', type=int, default=5)
+    queue_check.add_argument('--explain', action='store_true')
     runner = sub.add_parser('run', help='Compare and propose for review; dry run unless --submit')
     runner.add_argument('--submit', '--apply', dest='apply', action='store_true',
                         help='Submit pending proposals ONLY; --apply is a compatibility alias, never a candidate update')
@@ -311,6 +315,8 @@ def main():
         return
     config = json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
     review_actors(config)
+    if args.command == 'check-queue' and args.limit < 1:
+        raise ValueError('Queue limit must be positive')
     if args.command == 'run' and (args.limit < 1 or (args.id is not None and args.id < 1)):
         raise ValueError('Use positive limit and numeric ID')
     if args.command == 'run' and args.uuid:
@@ -326,6 +332,15 @@ def main():
               '| server hostname:', repo.server['hostname'], '| server port:', repo.server['port'], '| target:', repo.target_table)
         if args.command == 'check-connections':
             check_connections(config, repo, no_ollama=args.no_ollama)
+        elif args.command == 'check-queue':
+            import time
+            if args.explain:
+                repo.explain_queue()
+            start = time.monotonic()
+            for numeric_id in repo.iter_ids(limit=args.limit):
+                print('Queued numeric ID:', numeric_id)
+            print('Queue check elapsed seconds:', round(time.monotonic()-start, 3))
+            print('No browser session or database writes.')
         elif args.command == 'init-db':
             repo.initialize(); print('Review queue and history tables ready. Candidate tables unchanged.')
         else:

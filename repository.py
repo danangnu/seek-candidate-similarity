@@ -138,23 +138,151 @@ class Repository:
                 cur.execute(statement)
         self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
 
-    def ids(self):
-        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_scrap'])
-        t=TARGETS[self.target_table]
-        # A numeric person can have multiple historical snapshots. Rank the person
-        # by their newest profile date, not a row's insertion/scrape date or parent ID.
-        history_join = (' LEFT JOIN seek_scrap history ON history.id=s.seekid_detail'
-                        if self.target_table == 'seek_scrap_detail' else '')
-        profile_date = 'history.date_updated' if history_join else 's.date_updated'
+    QUEUE_PAGE_SIZE = 500
+
+    def _queue_read(self, sql, params=()):
+        # No cursor/transaction is kept open while Chrome works or the scraper idles.
+        self.connection.ping(reconnect=True)
+        self.verify_connection()
         with self.connection.cursor() as cur:
-            cur.execute(f"SELECT s.{t['numeric']} AS id, MAX({profile_date}) AS latest_profile_updated "
-                        f"FROM {self.target_table} s{history_join} "
-                        f"WHERE s.{t['numeric']} > 0 AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r "
-                        f"WHERE r.source_table=%s AND r.seekid_detail=s.{t['numeric']}) "
-                        f"GROUP BY s.{t['numeric']} "
-                        "ORDER BY latest_profile_updated IS NULL ASC, latest_profile_updated DESC, id ASC",
-                        (self.target_table,))
-            return [r['id'] for r in cur.fetchall()]
+            cur.execute(sql, params)
+            return cur.fetchall()
+
+    def _queue_eligible(self, ids):
+        if not ids:
+            return set()
+        t = TARGETS[self.target_table]
+        placeholders = ','.join(['%s'] * len(ids))
+        rows = self._queue_read(
+            f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
+            f"WHERE s.{t['numeric']} IN ({placeholders}) AND NOT EXISTS "
+            "(SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
+            f"AND r.seekid_detail=s.{t['numeric']})", tuple(ids) + (self.target_table,))
+        return {row['id'] for row in rows}
+
+    def _queue_latest_date(self, before=None):
+        predicate = 'date_updated IS NOT NULL' if before is None else 'date_updated < %s'
+        rows = self._queue_read(
+            'SELECT date_updated FROM seek_scrap FORCE INDEX (date_updated) WHERE '+predicate+
+            ' ORDER BY date_updated DESC LIMIT 1', () if before is None else (before,))
+        return rows[0]['date_updated'] if rows else None
+
+    def _queue_history_page(self, profile_date, before_pk=None):
+        cursor_filter = '' if before_pk is None else ' AND id_pk < %s'
+        params = (profile_date,) if before_pk is None else (profile_date, before_pk)
+        return self._queue_read(
+            'SELECT id_pk, id, date_updated FROM seek_scrap FORCE INDEX (date_updated) '
+            'WHERE date_updated=%s'+cursor_filter+' ORDER BY id_pk DESC LIMIT %s',
+            params + (self.QUEUE_PAGE_SIZE,))
+
+    def _queue_undated_page(self, after_id=0):
+        t = TARGETS[self.target_table]
+        # Reach this only after all dated history. Includes source IDs with no history.
+        return self._queue_read(
+            f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
+            f"WHERE s.{t['numeric']} > %s AND NOT EXISTS (SELECT 1 FROM seek_scrap h "
+            f"WHERE h.id=s.{t['numeric']} AND h.date_updated IS NOT NULL) "
+            "AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
+            f"AND r.seekid_detail=s.{t['numeric']}) ORDER BY s.{t['numeric']} ASC LIMIT %s",
+            (after_id, self.target_table, self.QUEUE_PAGE_SIZE))
+
+    def _queue_csv_ranked(self, candidate_ids):
+        # For an explicit CSV, aggregate only the selected numeric IDs via the id index.
+        dates = {}
+        for offset in range(0, len(candidate_ids), self.QUEUE_PAGE_SIZE):
+            chunk = candidate_ids[offset:offset+self.QUEUE_PAGE_SIZE]
+            eligible = self._queue_eligible(chunk)
+            if not eligible:
+                continue
+            placeholders = ','.join(['%s'] * len(eligible))
+            rows = self._queue_read(
+                'SELECT id, MAX(date_updated) AS latest_profile_updated '
+                'FROM seek_scrap FORCE INDEX (id) WHERE id IN ('+placeholders+') GROUP BY id',
+                tuple(sorted(eligible)))
+            latest = {row['id']: row['latest_profile_updated'] for row in rows}
+            dates.update({numeric_id: latest.get(numeric_id) for numeric_id in eligible})
+        # Stable numeric ties for the small explicitly selected CSV set.
+        ordered = sorted(dates)
+        ordered.sort(key=lambda numeric_id: str(dates[numeric_id] or ''), reverse=True)
+        return ordered
+
+    def iter_ids(self, limit=None, candidate_ids=None):
+        """Lazily yield newest-profile people; no whole-table GROUP BY/derived sort."""
+        if limit is not None and (type(limit) is not int or limit < 1):
+            raise ValueError('Queue limit must be a positive integer')
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_scrap'])
+        if candidate_ids is not None:
+            selected = sorted(set(candidate_ids))
+            if any(type(n) is not int or n < 1 for n in selected):
+                raise ValueError('CSV numeric IDs must be positive integers')
+            for index, numeric_id in enumerate(self._queue_csv_ranked(selected)):
+                if limit is not None and index >= limit:
+                    break
+                yield numeric_id
+            return
+        seen = set()
+        emitted = 0
+        scanned = 0
+        profile_date = self._queue_latest_date()
+        while profile_date is not None:
+            before_pk = None
+            while True:
+                page = self._queue_history_page(profile_date, before_pk)
+                if not page:
+                    break
+                before_pk = page[-1]['id_pk']
+                scanned += len(page)
+                fresh = []
+                for row in page:
+                    numeric_id = row['id']
+                    if numeric_id is not None and numeric_id > 0 and numeric_id not in seen:
+                        seen.add(numeric_id)
+                        fresh.append(numeric_id)
+                eligible = self._queue_eligible(fresh)
+                for numeric_id in fresh:
+                    if numeric_id in eligible:
+                        emitted += 1
+                        yield numeric_id
+                        if limit is not None and emitted >= limit:
+                            return
+                if scanned and scanned % (self.QUEUE_PAGE_SIZE * 20) == 0:
+                    print('Queue progress:', scanned, 'history rows scanned;', emitted, 'people yielded.')
+                if len(page) < self.QUEUE_PAGE_SIZE:
+                    break
+            profile_date = self._queue_latest_date(before=profile_date)
+        after_id = 0
+        while True:
+            page = self._queue_undated_page(after_id)
+            if not page:
+                return
+            after_id = page[-1]['id']
+            for row in page:
+                if row['id'] not in seen:
+                    seen.add(row['id'])
+                    emitted += 1
+                    yield row['id']
+                    if limit is not None and emitted >= limit:
+                        return
+            if len(page) < self.QUEUE_PAGE_SIZE:
+                return
+
+    def ids(self, limit=None, candidate_ids=None):
+        # Compatibility helper; normal scraping uses iter_ids instead of materializing all IDs.
+        return list(self.iter_ids(limit=limit, candidate_ids=candidate_ids))
+
+    def explain_queue(self):
+        self.preflight([self.target_table, 'seek_scrap', 'seek_uuid_match_review'])
+        queries = [('Latest date lookup',
+                    'SELECT date_updated FROM seek_scrap FORCE INDEX (date_updated) '
+                    'WHERE date_updated IS NOT NULL ORDER BY date_updated DESC LIMIT 1', ())]
+        latest = self._queue_latest_date()
+        if latest is not None:
+            queries.append(('History page within latest date',
+                            'SELECT id_pk,id,date_updated FROM seek_scrap FORCE INDEX (date_updated) '
+                            'WHERE date_updated=%s ORDER BY id_pk DESC LIMIT %s', (latest,self.QUEUE_PAGE_SIZE)))
+        for label, sql, params in queries:
+            print(label+':')
+            print(json.dumps(self._queue_read('EXPLAIN '+sql,params),default=str,indent=2))
 
     def rows(self, numeric_id):
         t=TARGETS[self.target_table]

@@ -145,7 +145,7 @@ class RuntimeBreakTest(unittest.TestCase):
         from compare import run
         import argparse,json,tempfile
         repo=Mock();repo.database='seek_uuid_test_unit';repo.target_table='seek_scrap_detail'
-        repo.ids.return_value=[42,43]
+        repo.iter_ids.return_value=[42,43]
         repo.rows.return_value=[dict(id_pk=1,id=42,uuid=None,name=None,file=None,scrap_date=None)]
         zero={k:0 for k in SETTINGS}
         # Init, first candidate, post-break reconnect, then next boundary invalid.

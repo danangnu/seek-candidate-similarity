@@ -18,7 +18,7 @@ class ReviewCliTest(unittest.TestCase):
         for use_csv in (False, True):
             with self.subTest(csv=use_csv), tempfile.TemporaryDirectory() as folder:
                 repo=Mock();repo.database='test';repo.target_table='seek_scrap_detail'
-                repo.ids.return_value=[90,12,70,3];repo.rows.return_value=[]
+                repo.iter_ids.return_value=[90,70,3] if use_csv else [90,12,70,3];repo.rows.return_value=[]
                 repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
                 csv_file=Path(folder)/'ids.csv';csv_file.write_text('id\n3\n70\n90\n')
                 args=argparse.Namespace(apply=False,auto_save=True,id=None,csv=str(csv_file) if use_csv else None,
@@ -26,6 +26,7 @@ class ReviewCliTest(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()):
                     run(args,{'created_by':'collector','report_dir':folder},repo)
                 self.assertEqual([c.args[0] for c in repo.rows.call_args_list],[90,70] if use_csv else [90,12])
+                repo.iter_ids.assert_called_once_with(limit=2,candidate_ids={3,70,90} if use_csv else None)
 
     def test_new_and_legacy_flags_both_mean_proposals(self):
         for flags in (['--submit','--auto-propose'],['--apply','--auto-save']):
@@ -43,7 +44,7 @@ class ReviewCliTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as stopped:main()
                 self.assertEqual(stopped.exception.code,2);repo.assert_not_called()
     def execute(self,auto=True,fail_report=False):
-        repo=Mock();repo.database='remote';repo.target_table='seek_scrap_detail';repo.ids.return_value=[42]
+        repo=Mock();repo.database='remote';repo.target_table='seek_scrap_detail';repo.iter_ids.return_value=[42]
         repo.rows.return_value=[{'id':42,'id_pk':1,'uuid':12345,'name':None,'file':None,'scrap_date':None}]
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         repo.submit_proposal.return_value={'review_id':77,'status':'pending','created':True}
@@ -70,6 +71,7 @@ class ReviewCliTest(unittest.TestCase):
     def test_numeric_parent_link_is_compared_and_assignment_forwarded(self):
         repo,browser,report,_=self.execute()
         repo.submit_proposal.assert_called_once()
+        repo.iter_ids.assert_not_called()  # Direct --id bypasses the large queue.
         self.assertEqual(repo.submit_proposal.call_args.args[-2:],('collector','human-reviewer'))
         self.assertEqual(report['review_status'],'pending');self.assertEqual(report['candidate_rows_updated'],0)
         self.assertNotIn('reviewed_by',report);repo.apply.assert_not_called()

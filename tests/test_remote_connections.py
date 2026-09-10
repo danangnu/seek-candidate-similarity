@@ -132,7 +132,7 @@ class OllamaHTTPTest(unittest.TestCase):
 class RemoteWorkflowTest(unittest.TestCase):
     def test_explicit_ollama_advice_does_not_override_exact_content_save(self):
         repo=Mock();repo.database='trackitlive';repo.target_table='seek_scrap_detail'
-        repo.ids.return_value=[42]
+        repo.iter_ids.return_value=[42]
         repo.rows.return_value=[dict(id_pk=1,id=42,uuid=None,name=None,file=None,scrap_date=None)]
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}

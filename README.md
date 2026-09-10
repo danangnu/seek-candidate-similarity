@@ -132,17 +132,29 @@ No conversion or new candidate UUID column is required for this collector.
 The separate review app's approved destination is now `seek_scrap_detail.uuid`,
 selected by `seekid_detail`. See [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
 
-Queue order is newest updated person first. For `seek_scrap_detail`, join
-`seek_scrap.id = seek_scrap_detail.seekid_detail` and use
-`MAX(seek_scrap.date_updated)` per person, descending. Multiple snapshots produce
-one numeric ID. Missing dates/missing history are placed last; equal dates use
-numeric ID ascending for a stable order. Python preserves this order through
-CSV filtering and applies `--limit` afterwards. An explicit `--id` selects only
-that person. The alternate `seek_scrap` source uses the same latest-date rule.
-This order reflects dates already stored in MariaDB at the start of the run,
-not a fresh live SEEK scan. The uploaded `date_updated` is a DATE column, so
-same-day updates cannot be ordered by time. Both source modes now require
-SELECT on `seek_scrap.id` and `seek_scrap.date_updated`; no schema change is needed.
+Queue order is newest updated person first. Normal collection walks the existing
+`seek_scrap.date_updated` index one date at a time, newest first, and reads at most
+500 history rows per page. It uses an `id_pk` cursor inside a date, so no OFFSET
+or full-history GROUP BY is needed. The first occurrence of each numeric person
+is their latest dated snapshot. Small membership queries match `seek_scrap.id`
+to `seek_scrap_detail.seekid_detail` and exclude existing proposals.
+
+For same-day profiles, history `id_pk` descending breaks ties. People with no
+dated history appear last in numeric-ID order. CSV selection uses indexed,
+restricted groups of at most 500 selected IDs and keeps numeric-ID ties within
+equal dates. Neither mode sorts by scrape time. The uploaded profile date is a
+DATE column, so actual within-day update times are unavailable.
+
+The scraper consumes this queue lazily and stops at `--limit`; it no longer loads
+all pending IDs before opening Chrome. `--id` bypasses queue loading entirely.
+Dates are read from the stored history as the cursor advances. A newly inserted
+or updated row ahead of the cursor may wait until the next run; this is not a
+frozen full-database snapshot. IDs already seen are not repeated in the run.
+
+Both modes require SELECT on `seek_scrap`; the default path uses its existing
+`date_updated` index and the CSV path uses its existing `id` index. No index is
+created automatically. See [QUEUE_PERFORMANCE.md](QUEUE_PERFORMANCE.md) for the
+read-only `check-queue --limit 5 --explain` timing/plan command and known limits.
 
 Normal batches exclude numeric IDs that already have ANY proposal in the same
 source table, including rejected proposals. An explicit `--id 260138` can
@@ -199,7 +211,7 @@ See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 94 tests,
+Run `python -m unittest discover -s tests -v`. This release passed 100 tests,
 including matching, browser-flow fakes, remote-service fixtures, idle timing,
 proposal/history transaction rollback, reviewer assignment and no candidate writes.
 SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL

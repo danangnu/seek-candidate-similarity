@@ -52,6 +52,12 @@ test_name_only_and_forged_exact_flag_blocked (test_detail_repository.ReviewRepos
 test_nonfinite_json_blocked_before_any_submission (test_detail_repository.ReviewRepositoryTest.test_nonfinite_json_blocked_before_any_submission) ... ok
 test_only_review_tables_ever_receive_writes (test_detail_repository.ReviewRepositoryTest.test_only_review_tables_ever_receive_writes) ... ok
 test_pending_proposal_has_snapshots_assignment_and_no_approval (test_detail_repository.ReviewRepositoryTest.test_pending_proposal_has_snapshots_assignment_and_no_approval) ... ok
+test_queue_csv_aggregates_only_selected_ids_and_keeps_missing_dates_last (test_detail_repository.ReviewRepositoryTest.test_queue_csv_aggregates_only_selected_ids_and_keeps_missing_dates_last) ... ok
+test_queue_deduplicates_across_pages_and_dates_with_same_date_ties (test_detail_repository.ReviewRepositoryTest.test_queue_deduplicates_across_pages_and_dates_with_same_date_ties) ... ok
+test_queue_empty_csv_and_invalid_limit (test_detail_repository.ReviewRepositoryTest.test_queue_empty_csv_and_invalid_limit) ... ok
+test_queue_generator_releases_cursor_before_submission_and_resumes (test_detail_repository.ReviewRepositoryTest.test_queue_generator_releases_cursor_before_submission_and_resumes) ... ok
+test_queue_limit_stops_before_older_dates_without_global_aggregation (test_detail_repository.ReviewRepositoryTest.test_queue_limit_stops_before_older_dates_without_global_aggregation) ... ok
+test_queue_skips_reviewed_and_non_detail_people_before_applying_limit (test_detail_repository.ReviewRepositoryTest.test_queue_skips_reviewed_and_non_detail_people_before_applying_limit) ... ok
 test_rejected_changed_evidence_allows_explicit_resubmission (test_detail_repository.ReviewRepositoryTest.test_rejected_changed_evidence_allows_explicit_resubmission) ... ok
 test_repeated_submission_keeps_assignment_and_one_history_event (test_detail_repository.ReviewRepositoryTest.test_repeated_submission_keeps_assignment_and_one_history_event) ... ok
 test_replay_does_not_reset_rejected_review (test_detail_repository.ReviewRepositoryTest.test_replay_does_not_reset_rejected_review) ... ok
@@ -94,7 +100,7 @@ test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.R
 test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
 
 ----------------------------------------------------------------------
-Ran 94 tests in 0.590s
+Ran 100 tests in 0.602s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -102,6 +108,14 @@ Checked 2 result cards; up to 1 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 different-name results.
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
+
+2026-09-10 paged queue update: 100 tests passed.
+Normal collection now uses lazy date-index pages and bounded membership queries.
+Regression checks cover early limit termination without whole-history GROUP BY,
+cross-page/date deduplication, reviewed-ID and source membership filtering, CSV
+restricted aggregation, no-history fallback, iterator resume and direct-ID bypass.
+No production timing claim: actual MariaDB 10.1 EXPLAIN/optimizer, network latency
+and live table volume were not tested. Use check-queue --limit 5 --explain.
 
 2026-09-10 latest supplied schema update: 94 tests passed.
 Updated fixtures and repository projections: detail.uuid VARCHAR; main integer

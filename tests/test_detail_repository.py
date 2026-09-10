@@ -38,6 +38,7 @@ class Cursor:
         if 'GET_LOCK' in sql:self.synthetic=[{'acquired':1}];return
         if 'RELEASE_LOCK' in sql or sql.startswith('SET TRANSACTION'):self.synthetic=[];return
         if sql.startswith('CREATE TABLE'):sql=sqlite_ddl(sql)
+        sql=re.sub(r' FORCE INDEX \([a-z_]+\)', '', sql)
         self.cur.execute(sql.replace('%s','?').replace(' FOR UPDATE',''),params)
     def fetchone(self):
         if self.synthetic is not None:return self.synthetic[0] if self.synthetic else None
@@ -183,6 +184,59 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.repo.initialize()
         tables={r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertNotIn('seek_candidate_identity_map',tables);self.assertNotIn('seek_uuid_backfill_audit',tables)
+    def test_queue_limit_stops_before_older_dates_without_global_aggregation(self):
+        self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
+        self.db.execute("INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (2,43,'2026-09-10')")
+        self.repo.QUEUE_PAGE_SIZE=1
+        self.repo.connection.statements.clear()
+        self.assertEqual(self.repo.ids(limit=1),[43])
+        queries=self.repo.connection.statements
+        self.assertFalse(any('GROUP BY' in q or 'MAX(' in q or 'OFFSET' in q for q in queries))
+        self.assertEqual(sum(q.startswith('SELECT id_pk, id, date_updated') for q in queries),1)
+        self.assertFalse(any('date_updated <' in q for q in queries))
+
+    def test_queue_deduplicates_across_pages_and_dates_with_same_date_ties(self):
+        self.repo.QUEUE_PAGE_SIZE=1
+        self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,NULL,NULL)',[(101,43),(102,44)])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
+                            [(2,43,'2026-09-10'),(3,43,'2026-09-10'),(4,44,'2026-09-10'),(5,43,'2025-01-01')])
+        self.assertEqual(self.repo.ids(),[44,43,42])
+        self.assertTrue(any('id_pk <' in q for q in self.repo.connection.statements))
+
+    def test_queue_skips_reviewed_and_non_detail_people_before_applying_limit(self):
+        self.submit()
+        self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
+                            [(2,43,'2025-01-01'),(3,999,'2026-09-10')])
+        self.repo.QUEUE_PAGE_SIZE=1
+        self.assertEqual(self.repo.ids(limit=1),[43])
+
+    def test_queue_csv_aggregates_only_selected_ids_and_keeps_missing_dates_last(self):
+        self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,NULL,NULL)',[(101,43),(102,44)])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
+                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,999,'2026-09-11')])
+        self.repo.connection.statements.clear()
+        self.assertEqual(self.repo.ids(limit=2,candidate_ids={42,43,44,999}),[43,42])
+        queries=self.repo.connection.statements
+        self.assertFalse(any('FORCE INDEX (date_updated)' in q for q in queries))
+        self.assertTrue(any('WHERE id IN (' in q and 'GROUP BY id' in q for q in queries))
+        self.assertEqual(self.repo.ids(candidate_ids={44}),[44])
+
+    def test_queue_empty_csv_and_invalid_limit(self):
+        self.assertEqual(self.repo.ids(candidate_ids=[]),[])
+        for limit in (0,-1,True):
+            with self.subTest(limit=limit),self.assertRaises(ValueError):self.repo.ids(limit=limit)
+
+    def test_queue_generator_releases_cursor_before_submission_and_resumes(self):
+        self.repo.QUEUE_PAGE_SIZE=1
+        self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
+        self.db.execute("INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (2,43,'2026-09-10')")
+        queue=self.repo.iter_ids(limit=2)
+        self.assertEqual(next(queue),43)
+        self.assertTrue(self.submit(numeric=43)['created'])
+        self.assertEqual(next(queue),42)
+        with self.assertRaises(StopIteration):next(queue)
+
     def test_latest_source_columns_match_uploaded_schema(self):
         detail = self.repo.rows(42)[0]
         self.assertEqual(detail['uuid'], '12345')
