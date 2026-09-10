@@ -7,15 +7,17 @@ from profiles import canonical_uuid
 from network_config import database_options
 
 TARGETS = {
-    'seek_scrap': {'pk': 'id_pk', 'numeric': 'id', 'uuid': 'uuid'},
-    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'seek_scrap_id'},
+    'seek_scrap': {'pk': 'id_pk', 'numeric': 'id', 'uuid': None},
+    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'uuid'},
 }
 
 
 def target_fields(table):
     t = TARGETS[table]
-    metadata = 'name, file, scrap_date' if table == 'seek_scrap' else 'NULL AS name, NULL AS file, NULL AS scrap_date'
-    return f"{t['pk']} AS id_pk, {t['numeric']} AS id, {t['uuid']} AS uuid, {metadata}"
+    metadata = ('name, file, scrap_date, seek_scrap_id AS source_link' if table == 'seek_scrap'
+                else 'NULL AS name, NULL AS file, NULL AS scrap_date')
+    uuid_column = t['uuid'] or 'NULL'  # seek_scrap has an integer link, not a UUID column.
+    return f"{t['pk']} AS id_pk, {t['numeric']} AS id, {uuid_column} AS uuid, {metadata}"
 
 from review_schema import REVIEW_COLUMNS, HISTORY_COLUMNS, schema_statements
 from profiles import compare_evidence, normalized_profile_content
@@ -200,7 +202,7 @@ class Repository:
             raise ValueError('Insufficient profile evidence to submit a proposal; name alone is not enough')
         if any(p.get('profile_content_scope') != 'profile_tab' or not p.get('profile_content') for p in (old,new)):
             raise ValueError('Both complete Profile snapshots are required for review')
-        encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, allow_nan=False)
         digest = hashlib.sha256(encode({
             'source_table': self.target_table, 'numeric_id': numeric_id, 'uuid': uid,
             'old': normalized_profile_content(old), 'new': normalized_profile_content(new),

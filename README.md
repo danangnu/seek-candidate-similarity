@@ -8,7 +8,7 @@ The separate review app will approve/reject and apply approved mappings later.
 ## Install this update
 
 Stop older running copies first. Replace the application files with this package,
-including the new `review_schema.py` and `review_schema.sql`. Keep your actual
+including `repository.py`, `review_schema.py` and the latest `review_schema.sql`. Keep your actual
 configuration and reports. Seven application modules are included:
 `compare.py`, `repository.py`, `profiles.py`, `seek_browser.py`,
 `runtime_breaks.py`, `network_config.py`, and `review_schema.py`.
@@ -47,6 +47,10 @@ python compare.py --config config.remote.json check-connections
 columns, insert candidate rows, migrate old mappings, or change existing reviews.
 Existing incompatible review tables need a deliberate migration; they are not
 silently replaced. Both source and review tables are expected to use InnoDB.
+The supplied dump identifies MariaDB 10.1.48. Setup keeps snapshots as LONGTEXT;
+JSON/CHECK constraints are version-gated for MariaDB 10.2.6 and later. On 10.1,
+application validation is required; the collector submits strict JSON and only
+pending proposals. The separate review app must enforce its decision rules.
 
 One candidate, preview only (local JSON report; no queue insert):
 
@@ -119,9 +123,14 @@ LIMIT 20;
 
 The default source is numeric `seek_scrap_detail.seekid_detail`.
 `database.target_table` now identifies a READ-ONLY source; the alternate source
-`seek_scrap.id` remains supported. A numeric value in `seek_scrap_detail.seek_scrap_id`
-is treated as existing source data, not a UUID and not a reason to skip collection.
-No conversion or new UUID column is required for this collector.
+`seek_scrap.id` remains supported. In the latest uploaded schema,
+`seek_scrap_detail.uuid` is the existing VARCHAR(255) UUID column and
+`seek_scrap.seek_scrap_id` is an integer link. The main `seek_scrap` table has
+no UUID column. Python reads the detail UUID as source state and preserves the
+main table link as `source_link` in evidence; neither value is changed.
+No conversion or new candidate UUID column is required for this collector.
+The separate review app's approved destination is now `seek_scrap_detail.uuid`,
+selected by `seekid_detail`. See [SCHEMA_COMPATIBILITY.md](SCHEMA_COMPATIBILITY.md).
 
 Queue order is newest updated person first. For `seek_scrap_detail`, join
 `seek_scrap.id = seek_scrap_detail.seekid_detail` and use
@@ -190,7 +199,7 @@ See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 91 tests,
+Run `python -m unittest discover -s tests -v`. This release passed 94 tests,
 including matching, browser-flow fakes, remote-service fixtures, idle timing,
 proposal/history transaction rollback, reviewer assignment and no candidate writes.
 SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL

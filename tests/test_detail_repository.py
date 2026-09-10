@@ -16,11 +16,15 @@ from test_backfill import FIXTURE
 UID='35011ba6-373e-8818-5731-45449246b18e'
 
 
-def sqlite_ddl(sql):
+def sqlite_ddl(sql, modern=True):
+    # Model MariaDB versioned-comment expansion; this is not a MariaDB parser.
+    sql=re.sub(r'/\*M!100206(.*?)\*/', lambda m: m.group(1) if modern else '', sql, flags=re.S)
     sql=re.sub(r'BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY','INTEGER PRIMARY KEY AUTOINCREMENT',sql)
     sql=re.sub(r' CHARACTER SET ascii COLLATE ascii_bin','',sql)
     sql=re.sub(r'UNIQUE KEY \w+ \(([^)]+)\)',r'UNIQUE (\1)',sql)
-    sql=re.sub(r'^ KEY .*,\n','',sql,flags=re.M)
+    sql=re.sub(r'\n\s*,', ',', sql)
+    sql=re.sub(r'^ KEY [^\n]*\n','',sql,flags=re.M)
+    sql=re.sub(r',\s*\)', ')', sql)
     return re.sub(r' ENGINE=InnoDB.*$','',sql,flags=re.S)
 
 
@@ -67,9 +71,9 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.repo.connection=Connection();self.repo.preflight=Mock();self.repo.verify_connection=Mock()
         self.db=self.repo.connection.db
         self.db.executescript('''
-        CREATE TABLE seek_scrap (id_pk INTEGER PRIMARY KEY, id INTEGER, uuid TEXT, name TEXT, file TEXT, scrap_date TEXT, date_updated TEXT);
-        CREATE TABLE seek_scrap_detail (id_detail INTEGER PRIMARY KEY, seekid_detail INTEGER UNIQUE, seek_scrap_id INTEGER, match_path_found TEXT);
-        INSERT INTO seek_scrap VALUES (1,42,'existing-main-value','Alex Example','',NULL,'2026-01-01');
+        CREATE TABLE seek_scrap (id_pk INTEGER PRIMARY KEY, id INTEGER, seek_scrap_id INTEGER, name TEXT, file TEXT, scrap_date TEXT, date_updated TEXT);
+        CREATE TABLE seek_scrap_detail (id_detail INTEGER PRIMARY KEY, seekid_detail INTEGER UNIQUE, uuid TEXT, match_path_found TEXT);
+        INSERT INTO seek_scrap VALUES (1,42,98765,'Alex Example','',NULL,'2026-01-01');
         INSERT INTO seek_scrap_detail VALUES (100,42,12345,'preserve matching metadata');
         ''')
         self.repo.initialize()
@@ -106,8 +110,8 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.assertEqual(json.loads(row['uuid_profile_snapshot']),self.profile)
         self.assertTrue(json.loads(row['comparison_evidence'])['comparison']['profile_content_equal'])
         self.assertEqual(row['row_version'],1)
-        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap_detail').fetchone()[0],12345)
-        self.assertEqual(self.db.execute('SELECT uuid FROM seek_scrap').fetchone()[0],'existing-main-value')
+        self.assertEqual(self.db.execute('SELECT uuid FROM seek_scrap_detail').fetchone()[0],'12345')
+        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],98765)
         self.assertEqual(self.repo.ids(),[])
         event=dict(self.db.execute('SELECT * FROM seek_uuid_match_review_history').fetchone())
         self.assertEqual(event['action'],'submitted');self.assertEqual(event['performed_by'],'collector')
@@ -148,13 +152,13 @@ class ReviewRepositoryTest(unittest.TestCase):
     def test_shared_uuid_can_be_proposed_for_review_without_assigning_identity(self):
         self.submit();self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,6789,NULL)')
         self.assertTrue(self.submit(numeric=43)['created'])
-        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap_detail WHERE seekid_detail=43').fetchone()[0],6789)
+        self.assertEqual(self.db.execute('SELECT uuid FROM seek_scrap_detail WHERE seekid_detail=43').fetchone()[0],'6789')
     def test_history_failure_rolls_back_proposal(self):
         self.db.execute("CREATE TRIGGER fail_history BEFORE INSERT ON seek_uuid_match_review_history BEGIN SELECT RAISE(ABORT,'test failure'); END")
         with self.assertRaises(sqlite3.IntegrityError):self.submit()
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM seek_uuid_match_review').fetchone()[0],0)
     def test_source_change_blocks_stale_submission(self):
-        old=fingerprint(self.repo.rows(42));self.db.execute("UPDATE seek_scrap_detail SET seek_scrap_id=999")
+        old=fingerprint(self.repo.rows(42));self.db.execute("UPDATE seek_scrap_detail SET uuid='changed-by-other-app'")
         with self.assertRaisesRegex(ValueError,'changed'):
             self.repo.submit_proposal(42,UID,old,self.evidence,'collector')
         self.assertEqual(self.db.execute('SELECT COUNT(*) FROM seek_uuid_match_review').fetchone()[0],0)
@@ -179,6 +183,33 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.repo.initialize()
         tables={r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertNotIn('seek_candidate_identity_map',tables);self.assertNotIn('seek_uuid_backfill_audit',tables)
+    def test_latest_source_columns_match_uploaded_schema(self):
+        detail = self.repo.rows(42)[0]
+        self.assertEqual(detail['uuid'], '12345')
+        self.repo.target_table='seek_scrap'
+        history = self.repo.rows(42)[0]
+        self.assertIsNone(history['uuid'])
+        self.assertEqual(history['source_link'],98765)
+        self.assertEqual(history['id'],42)
+        self.assertTrue(self.submit()['created'])
+        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],98765)
+
+    def test_legacy_review_ddl_has_no_json_functions_or_check_clauses(self):
+        connection=sqlite3.connect(':memory:')
+        try:
+            for statement in schema_statements():
+                ddl=sqlite_ddl(statement,modern=False)
+                self.assertNotIn('JSON_VALID',ddl);self.assertNotIn(' CHECK ',ddl)
+                connection.execute(ddl)
+            tables={r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertIn('seek_uuid_match_review_history',tables)
+        finally:connection.close()
+
+    def test_nonfinite_json_blocked_before_any_submission(self):
+        evidence=copy.deepcopy(self.evidence);evidence['untrusted_number']=float('nan')
+        with self.assertRaises(ValueError):self.submit(evidence)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM seek_uuid_match_review').fetchone()[0],0)
+
     def test_legacy_operator_does_not_become_reviewer(self):
         self.assertEqual(review_actors({'reviewer':'collector'}),('collector',None))
         self.assertEqual(review_actors({'created_by':'collector','reviewer':'old','review':{'assigned_reviewer':'human'}}),('collector','human'))

@@ -1,5 +1,7 @@
 -- Execute in the intended database; no USE, DROP or candidate-table ALTER/UPDATE.
 -- init-db loads these same statements. All application timestamps use UTC.
+-- MariaDB 10.1: LONGTEXT JSON is validated by the applications.
+-- JSON/CHECK clauses below execute only on MariaDB 10.2.6 and later.
 CREATE TABLE IF NOT EXISTS seek_uuid_match_review (
  review_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
  source_table VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -26,7 +28,8 @@ CREATE TABLE IF NOT EXISTS seek_uuid_match_review (
  UNIQUE KEY uq_seek_review_submission (submission_hash),
  KEY ix_seek_review_queue (status, assigned_reviewer, created_at),
  KEY ix_seek_review_pair (seekid_detail, proposed_uuid),
- KEY ix_seek_review_source (source_table, seekid_detail, status),
+ KEY ix_seek_review_source (source_table, seekid_detail, status)
+ /*M!100206 ,
  CONSTRAINT ck_seek_review_source CHECK (source_table IN ('seek_scrap_detail','seek_scrap')),
  CONSTRAINT ck_seek_review_id CHECK (seekid_detail > 0),
  CONSTRAINT ck_seek_review_exact CHECK (exact_content_match IN (0,1)),
@@ -42,6 +45,7 @@ CREATE TABLE IF NOT EXISTS seek_uuid_match_review (
        AND review_reason IS NOT NULL AND CHAR_LENGTH(TRIM(review_reason)) > 0)),
  CONSTRAINT ck_seek_review_applied CHECK (
    (status='applied' AND applied_at IS NOT NULL) OR (status<>'applied' AND applied_at IS NULL))
+ */
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE IF NOT EXISTS seek_uuid_match_review_history (
@@ -54,7 +58,9 @@ CREATE TABLE IF NOT EXISTS seek_uuid_match_review_history (
  change_details LONGTEXT NOT NULL,
  KEY ix_seek_review_history (review_id, history_id),
  CONSTRAINT fk_seek_review_history FOREIGN KEY (review_id)
-   REFERENCES seek_uuid_match_review (review_id) ON DELETE RESTRICT,
+   REFERENCES seek_uuid_match_review (review_id) ON DELETE RESTRICT
+ /*M!100206 ,
  CONSTRAINT ck_seek_review_history_json CHECK (JSON_VALID(change_details)),
  CONSTRAINT ck_seek_review_history_action CHECK (action IN ('submitted','assigned','approved','rejected','applied'))
+ */
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

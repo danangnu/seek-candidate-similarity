@@ -76,17 +76,19 @@ For every history record store `performed_by` from the authenticated session,
 not a browser-supplied staff ID, plus old/new status or assignment, row version
 and reason. History should be append-only to application users.
 
-The schema requires decision metadata for approved/rejected/applied states and
-requires `applied_at` only in the applied state. It does not implement user
+On MariaDB 10.2.6+ the setup includes checks for decision metadata in
+approved/rejected/applied states and `applied_at` only in the applied state.
+On the supplied MariaDB 10.1.48 server these checks are not installed/enforced:
+the review app MUST validate all these rules itself. The schema does not implement user
 authentication, authorization or the above transitions: the review app must.
 
 ## Applying an approved proposal later
 
 Approval alone does not update candidate tables. An authorized application action
-must apply the approved mapping. This package does not select or create a new
-production UUID column; configure the reviewed destination in that app once its
-schema is agreed. Do not overwrite the legacy numeric parent link merely because
-it is named `seek_scrap_id`.
+must apply the approved mapping. The latest supplied schema identifies the destination as
+`seek_scrap_detail.uuid` (VARCHAR(255)), matched using `seekid_detail`.
+The integer `seek_scrap.seek_scrap_id` must remain unchanged. Python creates no
+new candidate column and performs no approved UUID update.
 
 The apply transaction must:
 
@@ -117,9 +119,19 @@ implement reversal. Add that migration and service explicitly when building it.
 
 ## Database notes
 
-Snapshots and evidence use LONGTEXT plus explicit JSON_VALID checks; see
-[MariaDB JSON_VALID documentation](https://mariadb.com/docs/server/reference/sql-functions/special-functions/json-functions/json_valid).
-The unique submission hash prevents exact duplicate proposals. The history foreign
-key prevents orphaned events. Use InnoDB and a MariaDB version that enforces CHECK
-constraints. The supplied SQL contains only two CREATE TABLE IF NOT EXISTS
-statements; it neither selects a database nor alters existing candidate tables.
+Snapshots and evidence use LONGTEXT containing JSON objects. Python serializes
+strict JSON (non-finite numbers rejected) and validates proposal data before
+inserting. MariaDB 10.1.48 has no JSON functions or enforced CHECK constraints;
+the separate review app must parse JSON and validate decision/status fields itself.
+
+The setup wraps optional JSON_VALID/status checks in `/*M!100206 ... */`, so they
+execute only on MariaDB 10.2.6 and later. These versioned comments are documented
+in [MariaDB comment syntax](https://mariadb.com/docs/server/reference/sql-statements/comment-syntax).
+No JSON SQL functions are used during collection. If the server is upgraded,
+CREATE TABLE IF NOT EXISTS does not retrofit omitted checks into existing tables;
+add those in a separately reviewed migration if required.
+
+Primary/unique keys and the history foreign key remain in the 10.1-compatible
+DDL. The unique submission hash prevents duplicate proposals; the foreign key
+prevents orphaned history. The SQL contains only two CREATE TABLE IF NOT EXISTS
+statements, selects no database, and never alters existing candidate tables.
