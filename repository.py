@@ -1,4 +1,4 @@
-"""Configured MariaDB repository. Candidate IDs and all other candidate fields stay intact."""
+"""Proposal-only repository. Candidate tables are strictly read-only."""
 import hashlib
 import json
 import re
@@ -8,7 +8,7 @@ from network_config import database_options
 
 TARGETS = {
     'seek_scrap': {'pk': 'id_pk', 'numeric': 'id', 'uuid': 'uuid'},
-    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'uuid'},
+    'seek_scrap_detail': {'pk': 'id_detail', 'numeric': 'seekid_detail', 'uuid': 'seek_scrap_id'},
 }
 
 
@@ -17,24 +17,28 @@ def target_fields(table):
     metadata = 'name, file, scrap_date' if table == 'seek_scrap' else 'NULL AS name, NULL AS file, NULL AS scrap_date'
     return f"{t['pk']} AS id_pk, {t['numeric']} AS id, {t['uuid']} AS uuid, {metadata}"
 
-SCHEMA = [
-'''CREATE TABLE IF NOT EXISTS seek_candidate_identity_map (
- numeric_seek_id BIGINT NOT NULL PRIMARY KEY,
- profile_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL UNIQUE,
- change_id CHAR(36) CHARACTER SET ascii NOT NULL,
- reviewed_by VARCHAR(100) NOT NULL,
- reviewed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB''',
-'''CREATE TABLE IF NOT EXISTS seek_uuid_backfill_audit (
- change_id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
- numeric_seek_id BIGINT NOT NULL,
- profile_uuid CHAR(36) CHARACTER SET ascii NOT NULL,
- before_rows LONGTEXT NOT NULL,
- evidence LONGTEXT NOT NULL,
- reviewed_by VARCHAR(100) NOT NULL,
- created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
- reverted_at DATETIME NULL
-) ENGINE=InnoDB''']
+from review_schema import REVIEW_COLUMNS, HISTORY_COLUMNS, schema_statements
+from profiles import compare_evidence, normalized_profile_content
+
+COMPARISON_VERSION = 'profile_content_v2_review_v1'
+
+
+def staff_id(value, field, optional=False):
+    if optional and (value is None or value == ''):
+        return None
+    if not isinstance(value, str) or not value.strip() or len(value) > 100 or any(ord(c) < 32 for c in value):
+        raise ValueError(field+' must be a staff ID of 1 to 100 characters')
+    return value.strip()
+
+
+def review_actors(config):
+    # Legacy reviewer identified the operator; it never implies an approval.
+    creator = staff_id(config.get('created_by') or config.get('reviewer'), 'created_by')
+    review = config.get('review', {})
+    if not isinstance(review, dict):
+        raise ValueError('review must be an object')
+    assignee = staff_id(review.get('assigned_reviewer'), 'review.assigned_reviewer', optional=True)
+    return creator, assignee
 
 
 def blank(value):
@@ -75,6 +79,7 @@ class Repository:
 
     def verify_connection(self):
         with self.connection.cursor() as cur:
+            cur.execute("SET time_zone = '+00:00'")
             cur.execute('SELECT DATABASE() AS db, @@hostname AS hostname, @@port AS port')
             self.server = cur.fetchone()
             if not self.server or self.server['db'] != self.database:
@@ -101,78 +106,44 @@ class Repository:
                                      '. Check the selected database and breaks.settings_id. The bundled setup SQL is only for the local test copy.')
         return row
 
-    def preflight(self, tables, check_type=True, target_table=None):
+    def preflight(self, tables, check_type=False, target_table=None):
+        # Candidate tables are sources only. Their old numeric relationship columns
+        # are not changed or required to be UUID text columns.
         target = target_table or self.target_table
+        if target not in TARGETS:
+            raise ValueError('Unknown source table')
+        allowed = set(TARGETS) | {'seek_uuid_match_review', 'seek_uuid_match_review_history'}
+        if any(table not in allowed for table in tables):
+            raise ValueError('Unknown review/source table')
         with self.connection.cursor() as cur:
             for table in set(tables + [target]):
                 cur.execute('SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s',
                             (self.database, table))
                 row = cur.fetchone()
-                if not row or row['ENGINE'].lower() != 'innodb':
-                    raise ValueError(table+' must exist and use InnoDB')
+                if not row or not row['ENGINE'] or row['ENGINE'].lower() != 'innodb':
+                    raise ValueError(table+' must exist and use InnoDB. Run init-db for missing review tables.')
+                if table in ('seek_uuid_match_review', 'seek_uuid_match_review_history'):
+                    columns = REVIEW_COLUMNS if table == 'seek_uuid_match_review' else HISTORY_COLUMNS
+                    cur.execute('SELECT '+', '.join(columns)+' FROM '+table+' LIMIT 0')
             cur.execute('SELECT '+target_fields(target)+' FROM '+target+' LIMIT 0')
-            if check_type:
-                cur.execute('SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS '
-                            'WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s',
-                            (self.database, target, TARGETS[target]['uuid']))
-                column = cur.fetchone()
-                if not column or column['DATA_TYPE'].lower() not in ('char','varchar') or column['CHARACTER_MAXIMUM_LENGTH'] < 36:
-                    raise ValueError(target+'.'+TARGETS[target]['uuid']+' must be a text column of at least 36 characters. '
-                                     'For the uploaded detail schema run: python compare.py prepare-detail')
-
-    def prepare_detail(self):
-        """Explicit preparation of the configured database; DDL is separate from mapping transactions."""
-        if self.target_table != 'seek_scrap_detail':
-            raise ValueError('prepare-detail requires database.target_table = seek_scrap_detail')
-        self.preflight(['seek_scrap_detail', 'seek_scrap'], check_type=False)
-        with self.connection.cursor() as cur:
-            # Refuse to alter a declared parent/child relationship.
-            cur.execute('SELECT COUNT(*) AS n FROM information_schema.KEY_COLUMN_USAGE WHERE '
-                        '(TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s AND REFERENCED_TABLE_NAME IS NOT NULL) OR '
-                        '(REFERENCED_TABLE_SCHEMA=%s AND REFERENCED_TABLE_NAME=%s AND REFERENCED_COLUMN_NAME=%s)',
-                        (self.database,'seek_scrap_detail','uuid',self.database,'seek_scrap_detail','uuid'))
-            if cur.fetchone()['n']:
-                raise ValueError('uuid participates in a foreign key; schema needs explicit redesign before UUID storage')
-            cur.execute('SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS '
-                        'WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s',
-                        (self.database,'seek_scrap_detail','uuid'))
-            column=cur.fetchone()
-            integer_types=('tinyint','smallint','mediumint','int','bigint')
-            if column and (column['DATA_TYPE'].lower() in integer_types or
-                           (column['DATA_TYPE'].lower() in ('char','varchar') and column['CHARACTER_MAXIMUM_LENGTH'] < 36)):
-                cur.execute('ALTER TABLE seek_scrap_detail MODIFY COLUMN uuid VARCHAR(255) NULL DEFAULT NULL')
-                print('Changed seek_scrap_detail.uuid to VARCHAR(255). Existing values were preserved.')
-            elif not column or column['DATA_TYPE'].lower() not in ('char','varchar'):
-                raise ValueError('Unexpected uuid data type; preparation stopped')
-            # The uploaded table has a single-column unique key on seekid_detail.
-            cur.execute('SELECT INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns_list '
-                        'FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s '
-                        'GROUP BY INDEX_NAME, NON_UNIQUE', (self.database,'seek_scrap_detail'))
-            if not any(r['NON_UNIQUE']==0 and r['columns_list']=='seekid_detail' for r in cur.fetchall()):
-                raise ValueError('A unique single-column index on seekid_detail is required; existing rows were not changed')
-        self.preflight(['seek_scrap_detail'])
-        with self.transaction() as cur:
-            cur.execute('INSERT INTO seek_scrap_detail (seekid_detail) SELECT DISTINCT s.id FROM seek_scrap s '
-                        'WHERE s.id > 0 AND NOT EXISTS (SELECT 1 FROM seek_scrap_detail d WHERE d.seekid_detail=s.id)')
-            added=cur.rowcount
-            cur.execute("SELECT COUNT(*) AS n FROM seek_scrap_detail WHERE uuid IS NOT NULL AND TRIM(uuid)<>''")
-            preserved=cur.fetchone()['n']
-        print('Prepared',added,'missing detail rows from the configured seek_scrap IDs; preserved',preserved,'nonblank target values.')
-        print('Preparation does not copy UUIDs from seek_scrap or modify seek_scrap rows.')
 
     def initialize(self):
         self.preflight([self.target_table])
         with self.connection.cursor() as cur:
-            for statement in SCHEMA:
+            for statement in schema_statements():
                 cur.execute(statement)
-        self.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
 
     def ids(self):
-        self.preflight([self.target_table])
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
         t=TARGETS[self.target_table]
         with self.connection.cursor() as cur:
-            cur.execute(f"SELECT DISTINCT {t['numeric']} AS id FROM {self.target_table} WHERE {t['numeric']} > 0 "
-                        f"AND ({t['uuid']} IS NULL OR TRIM({t['uuid']})='') ORDER BY {t['numeric']}")
+            # Existing parent links are irrelevant to proposal collection. Every
+            # previously submitted ID is excluded from normal batches, even rejected.
+            cur.execute(f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
+                        f"WHERE s.{t['numeric']} > 0 AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r "
+                        f"WHERE r.source_table=%s AND r.seekid_detail=s.{t['numeric']}) ORDER BY s.{t['numeric']}",
+                        (self.target_table,))
             return [r['id'] for r in cur.fetchall()]
 
     def rows(self, numeric_id):
@@ -185,11 +156,11 @@ class Repository:
     @contextmanager
     def transaction(self):
         c = self.connection
-        lock = self.database+':uuid_backfill'
+        lock = 'seek_review:'+hashlib.sha256(self.database.encode()).hexdigest()[:40]
         with c.cursor() as cur:
             cur.execute('SELECT GET_LOCK(%s, 10) AS acquired', (lock,))
             if cur.fetchone()['acquired'] != 1:
-                raise ValueError('Another backfill process holds the database lock')
+                raise ValueError('Another proposal submission holds the database lock')
         try:
             with c.cursor() as cur:
                 cur.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
@@ -204,76 +175,65 @@ class Repository:
             with c.cursor() as cur:
                 cur.execute('SELECT RELEASE_LOCK(%s)', (lock,))
 
-    def apply(self, numeric_id, uid, expected_fingerprint, evidence, reviewer):
-        from uuid import uuid4
+    def submit_proposal(self, numeric_id, uid, expected_fingerprint, evidence, created_by, assigned_reviewer=None):
+        """Insert a pending proposal and submitted audit event; NEVER mutate candidates."""
+        if type(numeric_id) is not int or numeric_id <= 0:
+            raise ValueError('Numeric SEEK ID must be a positive integer')
         uid = canonical_uuid(uid)
-        self.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])
-        change_id = str(uuid4())
-        table=self.target_table
-        t=TARGETS[table]
+        created_by = staff_id(created_by, 'created_by')
+        assigned_reviewer = staff_id(assigned_reviewer, 'assigned_reviewer', optional=True)
+        old = evidence['old_profile']
+        selected = evidence['selected']
+        if canonical_uuid(selected['uuid']) != uid:
+            raise ValueError('Selected UUID differs from proposal UUID')
+        new = selected['profile']
+        comparison = compare_evidence(old, new)  # Recompute, never trust caller's flag.
+        if not comparison['profile_content_equal'] and not comparison['eligible_for_review']:
+            raise ValueError('Insufficient profile evidence to submit a proposal; name alone is not enough')
+        if any(p.get('profile_content_scope') != 'profile_tab' or not p.get('profile_content') for p in (old,new)):
+            raise ValueError('Both complete Profile snapshots are required for review')
+        encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+        digest = hashlib.sha256(encode({
+            'source_table': self.target_table, 'numeric_id': numeric_id, 'uuid': uid,
+            'old': normalized_profile_content(old), 'new': normalized_profile_content(new),
+            'version': COMPARISON_VERSION}).encode('utf-8')).hexdigest()
+        # Browsing/inference may outlast DB idle timeout. Reconnect BEFORE transaction.
+        self.connection.ping(reconnect=True)
+        self.verify_connection()
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
         with self.transaction() as cur:
-            cur.execute('SELECT '+target_fields(table)+f" FROM {table} WHERE {t['numeric']}=%s ORDER BY {t['pk']} FOR UPDATE", (numeric_id,))
-            rows = cur.fetchall()
-            if fingerprint(rows) != expected_fingerprint:
-                raise ValueError('Candidate rows changed since comparison. Rerun this numeric ID.')
-            cur.execute(f"SELECT {t['pk']} AS id_pk, {t['numeric']} AS id, {t['uuid']} AS uuid FROM {table} WHERE LOWER(TRIM({t['uuid']}))=%s FOR UPDATE", (uid,))
-            check_mapping(rows, cur.fetchall(), numeric_id, uid)
-            cur.execute('SELECT * FROM seek_candidate_identity_map WHERE numeric_seek_id=%s OR profile_uuid=%s FOR UPDATE',
-                        (numeric_id, uid))
-            mappings = cur.fetchall()
-            if any(r['numeric_seek_id'] != numeric_id or r['profile_uuid'] != uid for r in mappings):
-                raise ValueError('Conflicting approved identity mapping')
-            changes = [r for r in rows if blank(r['uuid'])]
-            if not changes:
-                return None, 0
-            cur.execute('INSERT INTO seek_uuid_backfill_audit '
-                        '(change_id,numeric_seek_id,profile_uuid,before_rows,evidence,reviewed_by) VALUES (%s,%s,%s,%s,%s,%s)',
-                        (change_id, numeric_id, uid, json.dumps({'target_table': table, 'rows': [{'id_pk': r['id_pk'], 'uuid': r['uuid']} for r in changes]}),
-                         json.dumps(dict(evidence, storage_target=table+'.'+t['uuid'], numeric_key=t['numeric']), ensure_ascii=False), reviewer))
-            if not mappings:
-                cur.execute('INSERT INTO seek_candidate_identity_map (numeric_seek_id,profile_uuid,change_id,reviewed_by) VALUES (%s,%s,%s,%s)',
-                            (numeric_id, uid, change_id, reviewer))
-            for row in changes:
-                cur.execute(f"UPDATE {table} SET {t['uuid']}=%s WHERE {t['pk']}=%s AND {t['numeric']}=%s AND ({t['uuid']} IS NULL OR TRIM({t['uuid']})='')",
-                            (uid, row['id_pk'], numeric_id))
-                if cur.rowcount != 1:
-                    raise ValueError('Concurrent candidate update; all changes rolled back')
-        return change_id, len(changes)
-
-    def rollback(self, change_id):
-        change_id = canonical_uuid(change_id)
-        self.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'], check_type=False)
-        with self.transaction() as cur:
-            cur.execute('SELECT * FROM seek_uuid_backfill_audit WHERE change_id=%s FOR UPDATE', (change_id,))
-            audit = cur.fetchone()
-            if not audit:
-                raise ValueError('Change ID not found')
-            if audit['reverted_at']:
-                return 0
-            payload = json.loads(audit['before_rows'])
-            # Earlier releases stored a plain list and always wrote seek_scrap.uuid.
-            table = 'seek_scrap' if isinstance(payload,list) else payload.get('target_table')
-            if table not in TARGETS:
-                raise ValueError('Unknown audit target; rollback refused')
-            self.preflight([], target_table=table)
-            t=TARGETS[table]
-            before = payload if isinstance(payload,list) else payload['rows']
-            for row in before:
-                cur.execute(f"SELECT {t['numeric']} AS id, {t['uuid']} AS uuid FROM {table} WHERE {t['pk']}=%s FOR UPDATE", (row['id_pk'],))
-                current = cur.fetchone()
-                if not current or current['id'] != audit['numeric_seek_id'] or current['uuid'] != audit['profile_uuid']:
-                    raise ValueError('A mapped row changed after backfill; rollback refused')
-            # Keep the identity map if another active backfill depends on it.
-            cur.execute('SELECT change_id FROM seek_uuid_backfill_audit WHERE numeric_seek_id=%s AND change_id<>%s '
-                        'AND reverted_at IS NULL FOR UPDATE', (audit['numeric_seek_id'], change_id))
-            other = cur.fetchall()
-            for row in before:
-                cur.execute(f"UPDATE {table} SET {t['uuid']}=%s WHERE {t['pk']}=%s", (row['uuid'], row['id_pk']))
-            cur.execute('UPDATE seek_uuid_backfill_audit SET reverted_at=CURRENT_TIMESTAMP WHERE change_id=%s', (change_id,))
-            if not other:
-                cur.execute('DELETE FROM seek_candidate_identity_map WHERE numeric_seek_id=%s AND profile_uuid=%s AND change_id=%s',
-                            (audit['numeric_seek_id'], audit['profile_uuid'], change_id))
-        return len(before)
+            cur.execute('SELECT review_id, status, assigned_reviewer FROM seek_uuid_match_review WHERE submission_hash=%s FOR UPDATE', (digest,))
+            existing = cur.fetchone()
+            if existing:
+                return {'review_id': existing['review_id'], 'status': existing['status'], 'created': False,
+                        'assigned_reviewer': existing['assigned_reviewer']}
+            cur.execute("SELECT review_id FROM seek_uuid_match_review WHERE source_table=%s AND seekid_detail=%s "
+                        "AND status IN ('pending','approved','applied') FOR UPDATE", (self.target_table, numeric_id))
+            if cur.fetchone():
+                raise ValueError('This numeric ID already has an active or applied proposal. Review it in the separate app.')
+            rows = self.rows(numeric_id)
+            if not rows or fingerprint(rows) != expected_fingerprint:
+                raise ValueError('Source rows changed since comparison. Rerun this numeric ID.')
+            evidence = dict(evidence, comparison=comparison, source_table=self.target_table,
+                            source_rows=rows, source_fingerprint=expected_fingerprint,
+                            numeric_key=TARGETS[self.target_table]['numeric'])
+            cur.execute('INSERT INTO seek_uuid_match_review '
+                        '(source_table,seekid_detail,proposed_uuid,numeric_profile_url,uuid_profile_url,'
+                        'numeric_profile_snapshot,uuid_profile_snapshot,comparison_evidence,exact_content_match,'
+                        'comparison_version,submission_hash,source_fingerprint,status,assigned_reviewer,created_by) '
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s)",
+                        (self.target_table, numeric_id, uid,
+                         'https://au.employer.seek.com/talentsearch/profiles/'+str(numeric_id),
+                         'https://au.employer.seek.com/talentsearch/profiles/'+uid,
+                         encode(old), encode(new), encode(evidence), int(comparison['profile_content_equal']),
+                         COMPARISON_VERSION, digest, expected_fingerprint, assigned_reviewer, created_by))
+            review_id = cur.lastrowid
+            cur.execute('INSERT INTO seek_uuid_match_review_history '
+                        '(review_id,action,performed_by,reason,change_details) VALUES (%s,%s,%s,%s,%s)',
+                        (review_id, 'submitted', created_by, 'Profile comparison submitted for human review',
+                         encode({'from_status': None, 'to_status': 'pending', 'assigned_reviewer': assigned_reviewer,
+                                 'row_version': 1, 'submission_hash': digest})))
+        return {'review_id': review_id, 'status': 'pending', 'created': True, 'assigned_reviewer': assigned_reviewer}
 
     def close(self):
         self.connection.close()

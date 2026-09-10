@@ -1,4 +1,4 @@
-"""SEEK legacy-ID to UUID migration CLI. Run --help for commands."""
+"""SEEK numeric-ID to UUID review proposal CLI. Run --help for commands."""
 import argparse
 import csv
 import getpass
@@ -7,7 +7,7 @@ import os
 from pathlib import Path, PureWindowsPath
 from uuid import uuid4
 from profiles import extract_candidate_profile, read_html, compare_evidence, compare_profiles_with_ollama, norm, canonical_uuid, automatic_match_decision
-from repository import Repository, blank, fingerprint
+from repository import Repository, fingerprint, review_actors
 from runtime_breaks import RuntimeBreaks, BreakSettingsError, validate_settings
 from network_config import ollama_options, check_ollama
 
@@ -69,12 +69,14 @@ def write_report(folder, numeric_id, report):
 
 def run(args, config, repo):
     from seek_browser import SeekBrowser
+    created_by, assigned_reviewer = review_actors(config)
+    print('Review-only mode: database writes create pending proposals; candidate tables are never updated.')
     use_ollama = not args.no_ollama and (not getattr(args, 'auto_save', False) or getattr(args, 'with_ollama', False))
     if getattr(args, 'auto_save', False):
         print('Automatic policy: first_identical_profile_content_v2 (first exact content match)')
     print('Ollama advisory:', 'enabled' if use_ollama else 'disabled')
     if args.apply:
-        repo.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])
+        repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
     source_mode = config.get('source_mode', 'live_numeric')
     if source_mode not in ('live_numeric', 'saved_html'):
         raise ValueError('source_mode must be live_numeric or saved_html')
@@ -83,22 +85,19 @@ def run(args, config, repo):
     pending = set(repo.ids())
     ids = [args.id] if args.id else [i for i in csv_ids(args.csv) if i in pending] if args.csv else sorted(pending)
     ids = ids[:args.limit]
-    breaks = RuntimeBreaks(config['reviewer'], repo.scrap_idle_settings,
+    breaks = RuntimeBreaks(created_by, repo.scrap_idle_settings,
                            config.get('breaks', {}).get('settings_id', 1)) if ids else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
     try:
         for numeric_id in ids:
             report = {'numeric_seek_id': numeric_id, 'database': repo.database,
-                      'target_table': repo.target_table, 'database_host': config.get('database', {}).get('host'), 'status': 'unresolved'}
+                      'target_table': repo.target_table, 'database_host': config.get('database', {}).get('host'), 'status': 'unresolved', 'created_by': created_by,
+                      'assigned_reviewer': assigned_reviewer, 'storage_table': 'seek_uuid_match_review'}
             try:
                 rows = repo.rows(numeric_id)
                 if not rows:
                     raise ValueError('Numeric ID is not present in the configured '+repo.target_table+'; check the selected database and candidate sample')
-                if not any(blank(r['uuid']) for r in rows):
-                    report['status'] = 'already_mapped'
-                    write_report(folder, numeric_id, report)
-                    continue
                 if browser is None:
                     browser = SeekBrowser(config.get('browser', {}))
                     browser.login()
@@ -110,10 +109,6 @@ def run(args, config, repo):
                 rows = repo.rows(numeric_id)
                 if not rows:
                     raise ValueError('Numeric ID disappeared from the configured target during the break')
-                if not any(blank(r['uuid']) for r in rows):
-                    report['status'] = 'already_mapped'
-                    write_report(folder, numeric_id, report)
-                    continue
                 if source_mode == 'live_numeric':
                     report['stage'] = 'loading_live_numeric_profile'
                     old, source = browser.numeric_profile(numeric_id)
@@ -180,7 +175,7 @@ def run(args, config, repo):
                 report['profiles_not_visited'] = len(links) - len(report['candidates'])
                 report['profiles_compared'] = sum('evidence' in c for c in report['candidates'])
                 if not getattr(args, 'auto_save', False) and any('capture_error' in c for c in report['candidates']):
-                    raise ValueError('One or more profiles could not be read; no mapping can be saved')
+                    raise ValueError('One or more profiles could not be read; no proposal can be submitted')
                 ordered = sorted(report['candidates'], key=lambda c: (c.get('evidence', {}).get('profile_content_equal', False),
                     c.get('evidence', {}).get('rank', -1)), reverse=True)
                 report['candidates'] = ordered
@@ -199,68 +194,48 @@ def run(args, config, repo):
                 if getattr(args, 'auto_save', False):
                     decision = automatic_match_decision(ordered, comparison_scope, report['search_complete'])
                     report['automatic_decision'] = decision
-                    if not decision['eligible']:
-                        report['status'] = 'auto_skipped'
-                        print('Automatic save skipped:', decision['reason'])
-                    elif not args.apply:
-                        report['status'] = 'auto_eligible_dry_run'
-                        print('Would automatically save', decision['uuid'], '(dry run; add --apply to save).')
-                    else:
-                        selected = next(c for c in ordered if c['uuid'] == decision['uuid'])
-                        evidence = {'source': source, 'old_profile': old, 'selected': selected,
-                                    'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
-                                    'profiles_not_visited': report['profiles_not_visited'],
-                                    'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
-                                    'candidates_compared': len(ordered), 'review_mode': 'automatic',
-                                    'review_reason': decision['reason'], 'automatic_decision': decision,
-                                    'candidate_ranks': [{'uuid': c['uuid'], 'name': c['profile']['candidate_name'],
-                                                         'rank': c['evidence']['rank'],
-                                                         'name_equal': c['evidence']['name_equal']} for c in ordered if 'evidence' in c]}
-                        report['stage'] = 'saving_uuid'
-                        change_id, count = repo.apply(numeric_id, selected['uuid'], fingerprint(rows), evidence,
-                                                     config['reviewer'])
-                        report.update({'status': 'saved', 'review_mode': 'automatic',
-                                       'change_id': change_id, 'rows_updated': count})
-                        print('Automatically saved UUID', selected['uuid'], 'for numeric SEEK ID', numeric_id,
-                              '| target:', repo.target_table, '| rows updated:', count, '| rollback change ID:', change_id)
-                    write_report(folder, numeric_id, report)
-                    continue
-                if not args.apply or not ordered:
-                    continue
-                print('Review OLD and NEW profiles in the JSON report. Ranking/confidence is not proof of identity.')
-                choice = input('Candidate number to save, or Enter to skip: ').strip()
-                if not choice:
-                    report['status'] = 'skipped'
-                elif not choice.isdigit() or not 1 <= int(choice) <= len(ordered):
-                    report['status'] = 'invalid_selection'
+                    selected = next((c for c in ordered if c['uuid'] == decision['uuid']), None) if decision['eligible'] else None
                 else:
-                    selected = ordered[int(choice)-1]
-                    if not selected['evidence']['eligible_for_review']:
-                        raise ValueError('Insufficient independent identity evidence; name-only updates are blocked')
-                    reason = input('Reason for confirming this identity match: ').strip()
-                    if len(reason) < 10:
-                        raise ValueError('A meaningful review reason is required')
-                    phrase = 'SAVE '+str(numeric_id)+' '+selected['uuid']
-                    if input('Type '+phrase+' to confirm: ').strip() != phrase:
-                        report['status'] = 'skipped'
-                    else:
-                        evidence = {'source': source, 'old_profile': old, 'selected': selected,
-                                    'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
-                                    'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
-                                    'candidates_compared': len(ordered), 'review_mode': 'manual', 'review_reason': reason}
-                        report['stage'] = 'saving_uuid'
-                        change_id, count = repo.apply(numeric_id, selected['uuid'], fingerprint(rows), evidence,
-                                                     config['reviewer'])
-                        report.update({'status': 'saved', 'change_id': change_id, 'rows_updated': count})
-                        print('Saved', count, 'target rows. Rollback change ID:', change_id)
+                    # Queue the strongest reviewable comparison, without approving it.
+                    selected = next((c for c in ordered if c.get('evidence', {}).get('profile_content_equal')
+                                     or c.get('evidence', {}).get('eligible_for_review')), None)
+                    decision = {'eligible': selected is not None,
+                                'reason': 'Strongest comparison proposed for human review; no approval has been made.'}
+                if selected is None:
+                    report['status'] = 'auto_skipped' if getattr(args, 'auto_save', False) else 'no_reviewable_match'
+                    print('Proposal skipped:', decision['reason'])
+                elif not args.apply:
+                    report['status'] = 'auto_eligible_dry_run' if getattr(args, 'auto_save', False) else 'proposal_dry_run'
+                    print('Would submit pending proposal', selected['uuid'], '(dry run; add --submit).')
+                else:
+                    evidence = {'source': source, 'old_profile': old, 'selected': selected,
+                                'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
+                                'profiles_not_visited': report['profiles_not_visited'],
+                                'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
+                                'candidates_compared': len(ordered),
+                                'selection_mode': 'automatic_exact' if getattr(args, 'auto_save', False) else 'ranked_proposal',
+                                'selection_reason': decision['reason'], 'automatic_decision': report.get('automatic_decision'),
+                                'report_reference': str(report_path.resolve()),
+                                'candidate_ranks': [{'uuid': c['uuid'], 'name': c['profile']['candidate_name'],
+                                                     'rank': c['evidence']['rank'],
+                                                     'name_equal': c['evidence']['name_equal']} for c in ordered if 'evidence' in c]}
+                    report['stage'] = 'submitting_review_proposal'
+                    result = repo.submit_proposal(numeric_id, selected['uuid'], fingerprint(rows), evidence,
+                                                  created_by, assigned_reviewer)
+                    report.update({'status': 'submitted' if result['created'] else 'already_submitted',
+                                   'review_id': result['review_id'], 'review_status': result['status'],
+                                   'candidate_rows_updated': 0, 'assigned_reviewer': result.get('assigned_reviewer')})
+                    print('Pending proposal submitted.' if result['created'] else 'Existing proposal retained.',
+                          '| review ID:', result['review_id'], '| status:', result['status'],
+                          '| assigned reviewer:', result.get('assigned_reviewer') or '(unassigned)', '| candidate rows updated: 0')
                 write_report(folder, numeric_id, report)
             except BreakSettingsError as ex:
                 report.update(status='stopped_invalid_break_settings', reason=str(ex))
                 write_report(folder, numeric_id, report)
                 raise
             except Exception as ex:
-                if report.get('status') == 'saved':
-                    print('Mapping WAS committed; report write failed. Check the database audit table. Change ID:', report.get('change_id'))
+                if report.get('status') in ('submitted', 'already_submitted'):
+                    print('Proposal exists in the database; report write failed. Check review ID:', report.get('review_id'))
                     raise
                 report['status'] = 'unresolved'
                 report['error_type'] = type(ex).__name__
@@ -270,7 +245,7 @@ def run(args, config, repo):
                     report['reason'] = str(ex)
                 else:
                     print('Unresolved:', type(ex).__name__, '| stage:', report.get('stage', 'setup'),
-                          '(no mapping saved; check browser/database)')
+                          '(proposal not confirmed; check review tables and browser/database)')
                 write_report(folder, numeric_id, report)
     finally:
         if browser:
@@ -281,8 +256,8 @@ def run(args, config, repo):
 def check_connections(config, repo, no_ollama=False):
     failures = []
     checks = [
-        ('UUID column and target table', lambda: repo.preflight([repo.target_table])),
-        ('Mapping and audit tables', lambda: repo.preflight(['seek_candidate_identity_map', 'seek_uuid_backfill_audit'])),
+        ('Candidate source table (read-only)', lambda: repo.preflight([repo.target_table])),
+        ('Review queue and history tables', lambda: repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])),
         ('Runtime break settings', lambda: validate_settings(repo.scrap_idle_settings(config.get('breaks', {}).get('settings_id', 1))))]
     if not no_ollama:
         checks.append(('Ollama endpoint and model', lambda: check_ollama(**ollama_options(config.get('ollama', {})))))
@@ -304,14 +279,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='config.json')
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('init-db', help='Create mapping/audit tables in the configured database')
-    sub.add_parser('prepare-detail', help='Alter the configured detail UUID column and seed missing numeric IDs from seek_scrap')
+    sub.add_parser('init-db', help='Create review queue/history tables only in the configured database')
     check = sub.add_parser('check-connections', help='Read-only database/schema/settings and Ollama-model checks; no Chrome or writes')
     check.add_argument('--no-ollama', action='store_true')
-    runner = sub.add_parser('run', help='Browse and compare; dry run unless --apply')
-    runner.add_argument('--apply', action='store_true')
-    runner.add_argument('--auto-save', action='store_true',
-                        help='Stop at the first identical full Profile-content match; add --apply to save')
+    runner = sub.add_parser('run', help='Compare and propose for review; dry run unless --submit')
+    runner.add_argument('--submit', '--apply', dest='apply', action='store_true',
+                        help='Submit pending proposals ONLY; --apply is a compatibility alias, never a candidate update')
+    runner.add_argument('--auto-propose', '--auto-save', dest='auto_save', action='store_true',
+                        help='Stop at the first identical full Profile-content match; add --submit to queue for review')
     ai_flags = runner.add_mutually_exclusive_group()
     ai_flags.add_argument('--no-ollama', action='store_true')
     ai_flags.add_argument('--with-ollama', action='store_true', help='Also request an advisory Ollama comparison in auto-save mode')
@@ -320,8 +295,6 @@ def main():
     group = runner.add_mutually_exclusive_group()
     group.add_argument('--id', type=int)
     group.add_argument('--csv')
-    rollback = sub.add_parser('rollback')
-    rollback.add_argument('change_id')
     compare = sub.add_parser('compare-files', help='Compare two saved profiles without Chrome or MariaDB')
     compare.add_argument('old_html'); compare.add_argument('new_html')
     compare.add_argument('--no-ollama', action='store_true')
@@ -336,8 +309,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
     config = json.loads(Path(args.config).read_text(encoding='utf-8-sig'))
-    if not config.get('reviewer') or len(config['reviewer']) > 100:
-        raise ValueError('Set reviewer to your staff ID in config.json')
+    review_actors(config)
     if args.command == 'run' and (args.limit < 1 or (args.id is not None and args.id < 1)):
         raise ValueError('Use positive limit and numeric ID')
     if args.command == 'run' and args.uuid:
@@ -353,13 +325,8 @@ def main():
               '| server hostname:', repo.server['hostname'], '| server port:', repo.server['port'], '| target:', repo.target_table)
         if args.command == 'check-connections':
             check_connections(config, repo, no_ollama=args.no_ollama)
-        elif args.command == 'prepare-detail':
-            repo.prepare_detail()
         elif args.command == 'init-db':
-            repo.initialize(); print('Mapping and audit tables ready.')
-        elif args.command == 'rollback':
-            if input('Type ROLLBACK '+args.change_id+' to restore UUID values: ').strip() == 'ROLLBACK '+args.change_id:
-                print('Restored rows:', repo.rollback(args.change_id))
+            repo.initialize(); print('Review queue and history tables ready. Candidate tables unchanged.')
         else:
             run(args, config, repo)
     finally:
@@ -370,7 +337,7 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print('\nStopped. Any committed mappings remain in the audit table.')
+        print('\nStopped. Any submitted proposals remain pending in the review queue.')
     except Exception as error:
         print('Stopped:', str(error) if isinstance(error, (ValueError, BreakSettingsError)) else type(error).__name__)
         if error.args and type(error.args[0]) is int:

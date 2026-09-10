@@ -1,577 +1,192 @@
-# SEEK numeric ID → UUID backfill
+# SEEK UUID proposals for human review
 
-This extends your two-file Python comparison script into a visible Chrome workflow:
+This release replaces direct UUID backfilling with a shared review queue.
+**Python never updates `seek_scrap_detail`, `seek_scrap`, or the old identity
+mapping/audit tables.** It compares live profiles and submits pending proposals.
+The separate review app will approve/reject and apply approved mappings later.
 
-1. Read pending numeric SEEK IDs from **configured `seek_scrap_detail.seekid_detail`**.
-2. Open SEEK and let you sign in, including any verification.
-3. Open `https://au.employer.seek.com/talentsearch/profiles/<numeric-id>` and read the live numeric-ID profile.
-4. Search Talent Search using that candidate's name and follow the result pages.
-5. Check names on every result card, then open only exact-name UUID profiles and compare their details with the live numeric-ID profile.
-6. Show evidence and an optional configured Ollama opinion.
-7. Save confirmed matches manually, or use `--auto-save --apply` to save the first identical complete Profile-content match without candidate-selection prompts.
+## Install this update
 
-The program is separate from the VB.NET application. It does not use `DllConnection`, `SQLSetting.ini`, TrackIt login tables, the shared LIVE configuration, or the VB application's browser. Database access uses the explicitly configured host, port, user and database. Local and remote servers are supported. See [REMOTE_SETUP.md](REMOTE_SETUP.md) for remote configuration and read-only connection checks.
-
-## Breaks from seek_scrap_settings (September 9 update)
-
-The Python scraper reads `seek_scrap_settings` through the SAME configured
-connection as the candidate tables. The default settings row is `id=1`.
-Only `idle_less_than`, `idle_less_than2`, `idle_more_than` and `idle_more_than2`
-are read; `updated_by` is the settings editor, not the current running user.
-The user identity is `reviewer` from your `config.json`.
-
-| Elapsed time for this run | Random break between candidate attempts | Values in your uploaded settings |
-| --- | --- | --- |
-| Less than 1 hour | `idle_less_than` to `idle_less_than2` seconds | 30–300 seconds |
-| At least 1 hour | `idle_more_than` to `idle_more_than2` minutes | 5–25 minutes |
-
-Breaks occur before moving to the next numeric candidate after either a
-successful or unresolved attempt. There is no initial break and no unnecessary
-break after the last candidate. The existing `browser.delay_seconds` pauses
-still occur before individual browser requests, including visits to multiple
-UUID profiles for one numeric candidate. Runtime breaks are additional and do
-not replace those request delays. A single candidate that takes over an hour
-finishes its attempt before the between-candidate break.
-
-The monotonic run timer starts after manual SEEK sign-in. It measures elapsed
-wall-clock time, INCLUDING short and long breaks. Exactly 3,600 seconds uses the
-minutes range. A long break does not reset the timer; subsequent breaks use
-minutes for the remainder of that run. Each Python process has its own timer
-and reviewer. Restarting starts a NEW timer; this version does not aggregate
-running time across processes, PCs, the VB application or earlier runs.
-
-Range endpoints are inclusive. Both zero endpoints mean no additional break
-for that phase. Missing, NULL, negative, non-integer or reversed settings stop
-the run with an explanation rather than silently using a different delay.
-Values refresh from the configured table at each candidate boundary. The current
-wait finishes at the duration already selected if settings change mid-break.
-Console countdowns appear once a minute during long waits; Ctrl+C stops promptly.
-Breaks occur outside database write transactions. The database connection is
-refreshed outside those transactions after a long pause.
-
-### Install this update
-
-1. Stop the current run with Ctrl+C.
-2. Copy all six application Python files from this ZIP, including
-   `runtime_breaks.py` and `network_config.py`. Keep your
-   existing `config.json` and existing saved reports.
-3. In LOCAL HeidiSQL, open and execute `setup_local_scrap_settings.sql` from this
-   ZIP once. It selects `seek_uuid_test_trackitlive`, preserves an existing table
-   and row, and creates settings id=1 with 30/300 seconds and 5/25 minutes only
-   if that row is missing. It does not import email addresses or OTP history.
-   If your local test database has a different name, change ONLY the `USE` line
-   to that local database first. Do not run the original dump unchanged: it
-   selects `trackitlive`.
-4. Run the same command as before, for example:
+Stop older running copies first. Replace the application files with this package,
+including the new `review_schema.py` and `review_schema.sql`. Keep your actual
+configuration and reports. Seven application modules are included:
+`compare.py`, `repository.py`, `profiles.py`, `seek_browser.py`,
+`runtime_breaks.py`, `network_config.py`, and `review_schema.py`.
 
 ```powershell
-python compare.py run --limit 5 --apply --auto-save
+pip install -r requirements.txt
 ```
 
-No config change is needed for settings id=1. To select another existing row,
-add a top-level configuration entry:
+Keep existing database, Ollama and browser settings. Add these top-level entries
+to your actual config, substituting your staff IDs:
 
 ```json
-"breaks": { "settings_id": 1 }
+"created_by": "dnurdiansyah",
+"review": {
+  "assigned_reviewer": null
+}
 ```
 
-Inspect or adjust the settings in your LOCAL database:
+Set `assigned_reviewer` to the intended reviewer's staff ID to assign new
+proposals, or leave it `null` for the separate app to assign later. It is not an
+approval. Existing `reviewer` configurations remain supported as the collector's
+identity if `created_by` is absent. Python does not verify staff membership;
+the separate app must resolve staff IDs against its authenticated user directory.
 
-```sql
-SELECT id, idle_less_than, idle_less_than2, idle_more_than, idle_more_than2
-FROM seek_uuid_test_trackitlive.seek_scrap_settings
-WHERE id = 1;
+For remote servers use [REMOTE_SETUP.md](REMOTE_SETUP.md). The commands below use
+`config.remote.json`; omit `--config config.remote.json` to use `config.json`.
+
+Create only the two review tables in the configured database, then check:
+
+```powershell
+python compare.py --config config.remote.json init-db
+python compare.py --config config.remote.json check-connections
 ```
 
-The connected database account needs SELECT permission on this table;
-setup additionally needs CREATE and INSERT. The example below remains local; remote connections are explicitly configured
-using REMOTE_SETUP.md. UUID target and exact-content matching are unchanged.
-Each report and saved mapping's audit evidence includes `runtime_break` with
-the reviewer, elapsed time, chosen duration and settings used.
+`init-db` reads the bundled `review_schema.sql`. It does not alter candidate
+columns, insert candidate rows, migrate old mappings, or change existing reviews.
+Existing incompatible review tables need a deliberate migration; they are not
+silently replaced. Both source and review tables are expected to use InnoDB.
 
-If committing this update to GitHub, include the new `runtime_breaks.py` and
-`tests/test_runtime_breaks.py`. If your `.gitignore` ignores all SQL files, use
-`git add -f setup_local_scrap_settings.sql` for this setup script only. Keep
-actual database exports and `config.json` out of the commit.
+One candidate, preview only (local JSON report; no queue insert):
 
-## Faster name filtering
+```powershell
+python compare.py --config config.remote.json run --limit 1 --auto-propose
+```
 
-The browser now reads candidate names directly from the result cards before
-opening full profiles. Only names matching the live baseline after normalization
-(case, whitespace and punctuation) are retained. For example, searching Robert
-Rogers no longer opens Robert Smith or other differently named people. Names
-with substantive differences, aliases or spelling variations are not opened by
-name search; this is consistent with the existing exact-name matching rule.
-You can use the explicit direct-pair comparison to investigate such cases.
+Five candidates, submit pending proposals automatically:
 
-All results pages are still scanned within the configured limits. In automatic
-mode, full-profile visits stop as soon as one exact content match is found. Other
-candidates sharing that name do not block the match. An unreadable or changed-name
-profile cannot qualify; the tool can continue to the next candidate. Searches
-with no exact-name cards make no profile visits and save no mapping.
+```powershell
+python compare.py --config config.remote.json run --limit 5 --submit --auto-propose
+```
 
-Console progress now reports cards checked, profiles selected and different-name
-cards skipped. The report and audit include the search-card names and UUIDs
-(without token-bearing links) under `search_scan`. The original 10-second delays
-remain; fewer profile visits provide the speed improvement. Automatic mode uses
-deterministic content equality and skips Ollama by default. Add `--with-ollama`
-to also request advice during automatic runs. Manual comparison requests advice
-unless `--no-ollama` is specified; AI advice never substitutes for exact content.
+Add `--with-ollama` for an advisory opinion from the configured Ollama server.
+Automatic comparison otherwise skips Ollama. The model never approves a proposal.
+Sign in to SEEK manually in the visible Chrome window, complete verification,
+then press Enter once in the terminal. No candidate number, reason or approval
+confirmation is requested by the collector.
 
-Keep the name-filter/browser changes when upgrading. Follow the destination
-update instructions below for the current required files and schema preparation.
-Stop the current run with Ctrl+C first. Existing saved mappings remain recorded.
+For a larger run (up to one million pending numeric IDs):
 
-## Change of destination: seek_scrap_detail.uuid
+```powershell
+python compare.py --config config.remote.json run --limit 1000000 --submit --auto-propose
+```
 
-The current default destination is now:
+### Compatibility changes
 
-| Purpose | Column |
+| Old command/flag | Current behavior |
 | --- | --- |
-| Numeric SEEK identity | `seek_scrap_detail.seekid_detail` |
-| UUID to save | `seek_scrap_detail.uuid` |
-| Detail row primary key | `seek_scrap_detail.id_detail` |
+| `--apply` | Alias for `--submit`: pending review inserts only |
+| `--auto-save` | Alias for `--auto-propose`: select first identical full Profile match |
+| `init-db` | Creates review queue/history only |
+| `prepare-detail` | Removed; no candidate schema changes |
+| `rollback` | Removed; candidate correction belongs to the review app |
 
-UUID saves do not modify `seek_scrap.uuid`. `seek_scrap` is used only by the
-explicit preparation command to seed missing numeric IDs from your existing
-local sample. Normal runs read pending IDs directly from `seek_scrap_detail`.
-The live numeric profile supplies the name because the detail table has no name
-column. Normal detail runs do not require corresponding `seek_scrap` rows or
-saved HTML files.
+Old mapping/audit tables and already-written UUID values are preserved. This
+release does not undo earlier approved or automatic backfills. Stop running old
+versions to prevent them continuing to update candidate tables.
 
-### Update your existing installation
+## Where results are saved
 
-Stop the program. Replace ALL SIX application files from this ZIP:
-`compare.py`, `profiles.py`, `seek_browser.py`, `repository.py`, `runtime_breaks.py` and `network_config.py`. Keep your
-own `config.json`, and add this field INSIDE its `database` object:
+In the SAME configured MariaDB database:
 
-```json
-"target_table": "seek_scrap_detail"
-```
+- `seek_uuid_match_review`: proposed numeric ID/UUID, both snapshots, evidence,
+  source fingerprint, comparison version, creator, assigned reviewer and status.
+- `seek_uuid_match_review_history`: a `submitted` event created in the same
+  transaction, recording the collector and initial reviewer assignment.
 
-Missing `target_table` now defaults to `seek_scrap_detail`. To intentionally use
-the previous destination, set it explicitly to `seek_scrap`. Other names are
-rejected; table/column identifiers cannot be supplied as arbitrary SQL.
+New rows have `status='pending'`, `row_version=1`, and NULL `reviewed_by`,
+`reviewed_at`, `review_reason`, and `applied_at`. Snapshots are JSON objects stored
+in LONGTEXT, including full extracted Profile text and structured fields. The
+other app can review these without reading files from your Windows PC.
 
-### Prepare the local table once
+Local diagnostic reports also remain at `reports/<run-id>/<numeric-id>.json`.
+Reports include `review_id`, `review_status`, and `candidate_rows_updated: 0`
+after successful submission. An optional report reference in database evidence
+is informational; snapshots and evidence are already in the database.
 
-Your uploaded schema has `uuid INT`. A UUID needs a text column. Run:
-
-```powershell
-python compare.py prepare-detail
-python compare.py init-db
-```
-
-`prepare-detail` acts on your explicitly configured database, including a remote database. It performs ALTER/INSERT operations; it is never run automatically. It requires the existing `seek_scrap_detail` and `seek_scrap` tables,
-checks for declared foreign-key relationships, and widens `uuid` to
-`VARCHAR(255)` when it is currently an integer or a short text column. It then
-adds only missing detail rows for distinct positive IDs in your local
-`seek_scrap` sample. New rows contain `seekid_detail`; other detail columns keep
-their defaults. Existing detail rows and their matching metadata are preserved.
-It does not copy existing UUIDs from `seek_scrap` and does not alter `seek_scrap`.
-The preparation is repeatable: missing rows are added once.
-
-Existing nonblank `uuid` values, including old numeric parent IDs, are
-preserved and excluded from ordinary pending runs. Do not clear them blindly.
-The earlier VB.NET importer used this column as an internal numeric parent-row
-link; repurposing it for UUIDs changes that meaning. Keep this schema change in
-the local test copy until those VB.NET consumers are adjusted. A declared
-foreign key on the column causes preparation to stop instead of removing it.
-MariaDB DDL is separate from transactions: the column widening is not undone by
-the mapping rollback command, even if seeding subsequently fails.
-
-If your current column is already `CHAR`/`VARCHAR` of at least 36 characters and
-the intended detail rows already exist, skip preparation and run `init-db`.
-If the local detail table itself is missing, create it from your supplied schema
-first. No production server is contacted by the preparation or writer.
-
-### Test the new destination
-
-```powershell
-python compare.py run --limit 1 --auto-save
-python compare.py run --limit 5 --apply --auto-save
-```
-
-The connection banner displays `target: seek_scrap_detail`. An eligible match
-updates only the UUID column for its numeric ID, equivalent to this parameterized
-operation, with additional transaction/conflict/audit checks:
+Inspect the queue in HeidiSQL with the intended database selected:
 
 ```sql
-UPDATE seek_scrap_detail
-SET uuid = :matched_uuid
-WHERE seekid_detail = :numeric_seek_id
-  AND (uuid IS NULL OR TRIM(uuid) = '');
+SELECT review_id, seekid_detail, proposed_uuid, exact_content_match,
+       status, created_by, assigned_reviewer, reviewed_by, created_at
+FROM seek_uuid_match_review
+ORDER BY review_id DESC
+LIMIT 20;
 ```
 
-The colon names above describe parameters; the Python code binds actual values.
-To verify in local HeidiSQL:
-
-```sql
-SELECT id_detail, seekid_detail, uuid
-FROM seek_uuid_test_trackitlive.seek_scrap_detail
-WHERE seekid_detail = 260138;
-```
-
-The audit record stores the destination table with each new change. Rollback
-restores that recorded destination. Earlier audit records with the old list
-format still roll back `seek_scrap.uuid`, so their meaning is preserved.
-
-## 1. Install on your Windows PC
-
-Extract this ZIP to a new folder. In PowerShell, open that folder and run:
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item config.example.json config.json
-```
-
-Use Python 3.10 or newer. Chrome must be installed. The normal browser startup uses Selenium Manager to find a compatible ChromeDriver. If your PC cannot download drivers, set `browser.chromedriver` to the full path of a driver that matches your Chrome version. Do not reuse the old Chrome 150 driver with Chrome 152.
-
-## 2. Configure MariaDB and baseline profiles (local example)
-
-Edit `config.json`:
-
-- `database.host`: `127.0.0.1`
-- `database.port`: your local MariaDB port, normally `3306`
-- `database.user`: a local account with SELECT on `seek_scrap_settings`, SELECT/UPDATE on the selected target, and CREATE/SELECT/INSERT/UPDATE/DELETE for the mapping/audit tables. `prepare-detail` additionally needs ALTER/INSERT on `seek_scrap_detail` and SELECT on local `seek_scrap`.
-- `database.database`: `seek_uuid_test_trackitlive`
-- `reviewer`: your staff ID
-
-The program prompts for the MariaDB password without displaying it. Optionally supply it through `SEEK_DB_PASSWORD` in the process environment. Do not put it into the JSON file or a command-line argument.
-
-**The numeric IDs must exist in your configured target table (local or remote).** Creating the seven empty tables is not enough. If you have only the earlier `seek_scrap` sample, run `prepare-detail` to create the missing local detail rows. The CSV option only selects numeric IDs; it does not insert candidate rows or change file paths in MariaDB.
-
-Your CSV had 1,000 snapshots covering 285 distinct numeric SEEK IDs. It uses Windows text encoding; the CSV filter supports UTF-8 and Windows-1252 and deduplicates IDs.
-
-### Live numeric profile (default)
-
-The baseline is now the live numeric-ID profile URL, not a saved file.
-Keep your existing configuration; the default is `"source_mode": "live_numeric"`.
-You can also add that setting explicitly at the top level of `config.json`.
-`path_mappings` is not used in this mode, and missing `seek_scrap.file` files do not
-block comparison. The local detail rows themselves must still exist (or be created using `prepare-detail`).
-
-After sign-in, the tool opens the numeric route, selects the Profile tab if
-necessary, and extracts the main profile. When the legacy `seek_scrap` target is explicitly selected, it also checks the
-profile name against that numeric ID's stored names. The detail target has no
-name column and uses the live numeric route as its baseline. Login redirects, missing/restricted profiles or unsupported
-HTML do not become a successful comparison.
-
-If SEEK redirects the numeric URL directly to a UUID, the tool records that UUID
-and reopens its profile for review. It does not pretend to have obtained two
-independent profiles in this case. If you specify a different UUID with `--uuid`,
-that conflict is rejected.
-
-### Compare a specific pair of URLs
-
-To compare the numeric and UUID routes directly, as in your screenshot, use:
-
-```powershell
-python compare.py run --id 12345678 --uuid 11111111-1111-1111-1111-111111111111
-```
-
-Replace BOTH example IDs with the numeric ID and UUID from your two links.
-The numeric ID must be in the selected configured target table. No name search is performed in this
-mode, and the report says `direct_pair`. Add `--apply` for normal reviewed-save
-prompts, or `--apply --auto-save` to save only if the complete normalized Profile
-content is identical. Without `--uuid`, the tool searches by the name
-read from the live numeric profile (unless the numeric route already redirects
-to a UUID).
-
-### Optional archived HTML mode
-
-The archived workflow requires both `database.target_table: "seek_scrap"` and
-`"source_mode": "saved_html"`. The detail target supports live numeric mode only. In that mode the PC must be able to read the `.txt`
-HTML paths in `seek_scrap.file`. Network folders may be remapped while preserving
-numeric-ID subfolders:
-
-```json
-"path_mappings": [
-  {
-    "from": "\\\\server\\share\\SEEK Scrape Results",
-    "to": "C:\\SEEK_Backfill\\old_html"
-  }
-]
-```
-
-Archived mode tries snapshots newest first and records a fallback to older
-usable files. Inconsistent historical names require manual investigation.
-
-## Request pacing (updated version)
-
-The default example now uses `"delay_seconds": 10` under `browser`.
-It pauses BEFORE every name search, numeric-ID or UUID profile visit, next-results-page
-click, and Profile-tab selection when necessary. This includes the transition
-to the next numeric ID. The previous version paused only after reading a profile.
-Page loading, comparison and your review add more time to that fixed pause.
-The initial manual sign-in and local DOM polling are not delayed.
-
-When updating, replace `seek_browser.py` in your existing installation and edit
-`browser.delay_seconds` in YOUR `config.json` to `10` (or a longer interval).
-Keep your existing database settings and path mappings. An existing explicit
-value of `1` continues to mean one second; replacing the example file alone does
-not change your actual configuration. Values from 0 to 300 seconds are accepted.
-
-The console displays each pause; Ctrl+C stops the run. A ten-second delay is a
-configurable starting value, not a verified SEEK rate limit or a guarantee
-against account restrictions. If SEEK displays a rate-limit, verification or
-account-restriction message, stop the run and follow SEEK's instructions. This
-version does not implement automatic block detection or Retry-After handling.
-
-## 3. Configure Ollama (local example; remote instructions in REMOTE_SETUP.md)
-
-Use your installed Ollama application and a local model:
-
-```powershell
-ollama list
-```
-
-Set `ollama.model` to the exact installed model name, for example `llama3.1:8b`. If needed, install that model with `ollama pull llama3.1:8b`. Keep Ollama running on `http://127.0.0.1:11434`.
-
-Ollama sees only the extracted candidate fields, not browser cookies or token-bearing URLs. Its confidence is an uncalibrated opinion, not an identity probability. Profile content is presented as untrusted data, and the model cannot execute SQL or approve a mapping.
-
-Use `--no-ollama` to compare structured evidence without the model. If Ollama fails, the report records that it was unavailable; it does not invent an AI verdict.
-
-## 4. First run: compare only
-
-```powershell
-.\.venv\Scripts\python.exe compare.py run --limit 5
-```
-
-Or test one numeric SEEK ID already in your database:
-
-```powershell
-.\.venv\Scripts\python.exe compare.py run --id 569702361
-```
-
-The terminal prints the configured host, actual server hostname/port and selected database. Chrome opens visibly. Sign in yourself, complete any verification, open Talent Search, then return to PowerShell and press Enter. No SEEK password is stored in the script.
-
-The script searches by name through `searchQuery` using the supplied new Talent Search route, handles the introduction popup and compares UUID profiles. It does not click **Access profile**, **Send message**, **Connect**, or any other paid/contact action. Restricted or incomplete profiles stay unresolved.
-
-Reports are written under `reports/<run-id>/<numeric-id>.json`. Each contains the baseline profile, compared UUID profiles, shared evidence and model opinion if available. Live mode records the numeric URL, any redirected UUID and a hash of the extracted baseline fields; archived mode records the source snapshot ID and file SHA-256. It does not store full browser HTML or `serviceToken` links.
-
-### Limit a run to your CSV
-
-```powershell
-.\.venv\Scripts\python.exe compare.py run --csv "C:\path\09(2).csv" --limit 5
-```
-
-Only IDs both present in the CSV and pending in the selected configured target table are processed. With no CSV, all pending numeric IDs are eligible. Already-filled IDs are excluded from subsequent ordinary/CSV runs. Unresolved IDs remain pending; use `--id` to investigate a particular record.
-
-## Automatic saving: no candidate number, reason or confirmation prompts
-
-First complete the destination update and column preparation above. Automatic
-saving uses the same target and audit schema as manual saving; the flag itself
-requires no further schema change. First-time users must still run
-`python compare.py init-db` once.
-
-Run the known candidate automatically:
-
-```powershell
-python compare.py run --id 260138 --apply --auto-save
-```
-
-Or process a small batch:
-
-```powershell
-python compare.py run --limit 5 --apply --auto-save
-```
-
-You still enter the MariaDB password when needed and sign in to SEEK once.
-After that, there are no candidate-selection, reason or SAVE-confirmation
-questions. Eligible matches save automatically. Others are skipped and their
-reason is recorded in the JSON report; automatic mode never falls back to a
-manual prompt. Existing nonblank UUIDs and conflicting mappings are protected
-by the same transactional checks.
-
-To preview automatic decisions without any database updates:
-
-```powershell
-python compare.py run --limit 5 --auto-save
-```
-
-Automatic policy `first_identical_profile_content_v2` compares the main Profile
-panel captured from both pages' HTML. It compares the name, structured career
-history, summary, education, licences, skills, languages and current status,
-plus ALL Profile-panel text, including career descriptions and unrecognized
-sections. It ignores surrounding navigation, interaction-history tabs,
-recommendation cards, buttons, CSS/classes and generated element IDs. Unicode
-and whitespace are normalized; actual words, dates, punctuation and case are
-retained. This is exact equality of normalized candidate content, not a
-byte-for-byte comparison of the entire HTML page.
-
-Both captures must contain an identifiable main Profile tab and non-name
-evidence: a complete employer/title/date entry, or a summary together with
-education or licences. A name alone, a loading screen, or an old extraction
-without the full Profile tab cannot qualify. A summary is NOT required when a
-complete career entry is present. Two employers are NOT required. Matching
-names only select which pages to visit; rank 100 or an Ollama verdict cannot
-substitute for identical content.
-
-For each numeric ID, the first exact content match is saved immediately and the
-remaining UUID profiles are not visited. The run then moves to the next numeric
-ID. The report records `profiles_not_visited`; it does not claim the unvisited
-profiles were checked or that the chosen account is unique. Identical visible
-content does not establish uniqueness across separate accounts. Existing
-mapping collisions still prevent writes.
-
-Discovery still requires collection of result cards within the configured
-search limits. Explicit `--uuid` pairs and numeric-route redirects also support
-automatic comparison, without claiming a name search was performed. A redirect
-is recorded as such and is not presented as two independently obtained profiles.
-
-The JSON evidence includes:
-
-- `profile_content_equal`: the actual automatic equality result.
-- `old_content_sha256` and `new_content_sha256`: normalized content hashes.
-- `differing_fields`: fields that differ; `profile_content` includes full tab text.
-- `full_profile_tab_captured` and `non_name_details_present`: readiness checks.
-- Both extracted records, including `profile_content`, for investigating differences.
-
-When no exact match is found, no UUID is written. Inspect the differing fields
-instead of relying on the old rank. The September 9 console log alone cannot
-prove the entire Profile content matched because the old extractor omitted
-fields and descriptions; run the updated version to capture that evidence.
-
-Audit evidence records the generated reason, matching policy, content hashes,
-selected UUID and `review_mode: automatic`. The configured `reviewer` identifies
-the operator, not a claim of manual review. Rollback remains available.
-
-Reports use `auto_eligible_dry_run`, `auto_skipped`, or `saved` as appropriate.
-A successful automatic write prints `Automatically saved UUID ...` with the
-numeric ID, target table, affected-row count and rollback change ID. A dry run
-prints `Would automatically save ...` and never updates the database.
-
-Search readiness now accepts both `1 matching profile` and plural result counts.
-The log/report identifies whether a timeout happened while loading the numeric
-profile, loading search results, comparing UUID profiles or saving. The earlier
-two search timeouts have not been reproduced live here; a timeout in a changed
-layout may still require a new HTML capture. Profile extraction waits for loaded,
-stable content over 1.5 seconds of polling. This does not expand collapsed sections
-or access restricted content; it compares the Profile content present in the DOM.
-
-## Quick test of the updated matching rule
-
-Keep your local database configuration and ten-second delay, replace the six
-Python files, and run:
-
-```powershell
-python compare.py run --id 464775 --apply --auto-save
-```
-
-Then check local HeidiSQL:
-
-```sql
-SELECT id_detail, seekid_detail, uuid
-FROM seek_uuid_test_trackitlive.seek_scrap_detail
-WHERE seekid_detail = 464775;
-```
-
-The UUID is saved in `uuid`; the legacy numeric ID remains in
-`seekid_detail`. Existing nonblank destination values are preserved. Once the
-single-record result is verified, run `--limit 5 --apply --auto-save`.
-
-## 5. Save reviewed mappings (manual mode)
-
-Initialize two additional tables once:
-
-```powershell
-.\.venv\Scripts\python.exe compare.py init-db
-```
-
-Then run:
-
-```powershell
-.\.venv\Scripts\python.exe compare.py run --limit 5 --apply
-```
-
-For each numeric ID:
-
-1. Read the old and new profiles in the JSON report, including career dates and contradictions.
-2. Select the matching candidate's number, or press Enter to skip.
-3. Enter your reason for confirming the match.
-4. Type the exact displayed `SAVE <numeric-id> <uuid>` phrase.
-
-In manual mode, all writes require review, even when the top rank is high. Same-name-only matches are blocked. This first version permits review for an exact normalized name plus at least one shared employer/job-title pair, or a substantial identical summary. That is a minimum review gate, not proof. Multiple plausible people should be skipped. Name variations requiring an override are not supported in this version.
-
-The database transaction uses the selected target table:
-
-- Rechecks the original row fingerprint to detect changes since comparison.
-- Rejects a numeric ID with a different nonblank UUID.
-- Rejects a UUID already linked to a different numeric ID or approved mapping.
-- Allows UUID-only rows with a NULL numeric identity; it does not assign them a numeric ID.
-- Adds an identity mapping and a detailed audit record with the original UUID values.
-- Updates only blank `seek_scrap_detail.uuid` values where `seekid_detail` matches the numeric ID (or `seek_scrap.uuid` in explicit legacy-target mode).
-- Rolls everything back if any part fails.
-
-`seekid_detail`, `id_detail`, matching metadata, and other fields stay unchanged. The uploaded detail schema uniquely indexes `seekid_detail`; each legacy numeric ID normally has one detail row. The two new tables are `seek_candidate_identity_map` and `seek_uuid_backfill_audit`.
-
-Use a local test copy with the old scraper stopped while validating. The tool uses database transactions and an application lock, but unrelated applications do not necessarily obey the same mapping rules. If a connection is lost around commit, check the audit table before deciding that an update failed.
-
-### Check results in HeidiSQL
-
-```sql
-USE seek_uuid_test_trackitlive;
-SELECT numeric_seek_id, profile_uuid, reviewed_by, reviewed_at
-FROM seek_candidate_identity_map
-ORDER BY reviewed_at DESC;
-
-SELECT id_detail, seekid_detail, uuid
-FROM seek_scrap_detail
-WHERE seekid_detail = 569702361
-ORDER BY id_detail;
-
-SELECT change_id, numeric_seek_id, profile_uuid, created_at, reverted_at
-FROM seek_uuid_backfill_audit
-ORDER BY created_at DESC;
-```
-
-### Roll back a saved mapping
-
-Use the change ID printed after a save or stored in the audit table:
-
-```powershell
-.\.venv\Scripts\python.exe compare.py rollback YOUR-CHANGE-ID
-```
-
-Type the displayed confirmation. Rollback restores the exact previous UUID values only on rows changed by that transaction. It refuses if any affected row is missing or no longer has the expected numeric ID/UUID. An audit record remains. An existing mapping owned by an earlier change is preserved; a mapping created by this change is removed only when no other active backfill depends on it.
-
-## Search and matching limits
-
-- A name search is discovery, not an exhaustive proof of identity. SEEK's search behavior, access level and available profile data affect what it returns.
-- When discovering candidates by name, all returned result pages must be collected within `max_search_pages` and `max_candidates`. Truncation, changing result counts, repeated pages and unreadable card names block that search. In automatic mode, an unreadable UUID profile is skipped and cannot qualify; a later exact match can still save. Manual mode requires every selected profile to be readable.
-- Career history is scoped to its own section. Employer, title and date are separate fields; education is not mixed into career history. Similar-candidate anchors are excluded.
-- A changed title/location or missing data is not automatically a different person. A human must assess the evidence.
-- Numeric URLs and UUID URLs both need a readable main Profile view. In optional archived mode, old saved HTML in an unsupported layout is skipped. Other layouts may need additional adapters.
-- This tool does not migrate the rest of the VB.NET emergency scraping workflow or create a mapping for someone who cannot be reliably identified.
-
-## Offline comparison and checks
-
-The original two-file comparison is still available, without importing code triggering a run:
-
-```powershell
-.\.venv\Scripts\python.exe compare.py compare-files seekid.txt uuid.txt --no-ollama
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
-
-Supply your own existing `seekid.txt` and `uuid.txt`; candidate HTML and database exports are not bundled in this code package.
-
-Validation performed here: 75 automated tests (offline/fake services), Python syntax checks, extraction against both supplied comparison profiles and the earlier full-profile capture. Seven repository tests execute target updates and rollback through a SQLite adapter; they do not validate MariaDB-specific DDL or locking. Tests cover detail-only writes, preservation of old numeric values, transaction failure, collision checks and rollback of older main-table audit records. The supplied numeric/UUID HTML pair produced identical normalized full Profile content and matching hashes. Both comparison profiles yielded four career entries with job titles, two education entries and eight licence/certification entries. The separate CV-tab capture correctly failed the full-profile readiness check.
-
-**Not tested here:** actual SEEK sign-in/search, a running local Ollama model, or live MariaDB writes/rollback. Start with one candidate in the local test database and verify the saved rows and rollback before a larger batch. No production writes were performed.
-
-## Files
-
-- `compare.py`: command-line workflow, live/archived source selection, review and reports.
-- `profiles.py`: HTML extraction, UUID validation, matching evidence and Ollama API.
-- `seek_browser.py`: visible Chrome sign-in, numeric/UUID profiles, name search, pagination and pauses.
-- `repository.py`: configured local/remote database connection, settings reads, mapping transaction and rollback.
-- `network_config.py`: connection validation, verified TLS options, Ollama transport and model checks.
-- `config.remote.example.json`, `REMOTE_SETUP.md`: remote setup and commands.
-- `runtime_breaks.py`: reviewer/run timer and database-driven random breaks.
-- `setup_local_scrap_settings.sql`: local table and settings preparation.
-- `config.example.json`, `requirements.txt`: setup.
-- `tests/test_backfill.py`: offline regression tests.
-
-Implementation references: [Selenium Manager](https://www.selenium.dev/documentation/selenium_manager/), [Selenium waits](https://www.selenium.dev/documentation/webdriver/waits/), [Ollama chat API](https://docs.ollama.com/api/chat), [PyMySQL connections](https://pymysql.readthedocs.io/en/latest/modules/connections.html).
+## Collection and matching rules
+
+The default source is numeric `seek_scrap_detail.seekid_detail`.
+`database.target_table` now identifies a READ-ONLY source; the alternate source
+`seek_scrap.id` remains supported. A numeric value in `seek_scrap_detail.seek_scrap_id`
+is treated as existing source data, not a UUID and not a reason to skip collection.
+No conversion or new UUID column is required for this collector.
+
+Normal batches exclude numeric IDs that already have ANY proposal in the same
+source table, including rejected proposals. An explicit `--id 260138` can
+investigate a previously submitted candidate. Identical profile evidence returns
+the existing review ID without overwriting its decision/assignment or adding
+another submitted event. Changed evidence can create a new proposal after a
+rejection; existing pending, approved or applied proposals block a replacement.
+Proposals for different numeric IDs may share a UUID: reviewers must resolve
+identity collisions before applying, as described in the review-app contract.
+
+The default `source_mode` is `live_numeric`: open the numeric profile, search by
+name, scan result pages, and compare same-name UUID profiles. Direct comparison
+is available with `run --id NUMERIC_ID --uuid UUID`. `--csv file.csv` restricts
+normal pending IDs using an `id` column. Archived HTML mode remains supported
+for `seek_scrap` with `source_mode: saved_html` and existing `path_mappings`.
+
+`--auto-propose` stops at the first identical normalized COMPLETE Profile-tab
+content match, then submits only that proposal. Name or score alone is not
+sufficient. Normalization ignores markup/styling and whitespace while preserving
+Profile content, names, career history, dates, education, skills and descriptions.
+This is not a guarantee of identity; human review is still required.
+
+Without `--auto-propose`, Python compares the available candidates and proposes
+the strongest comparison eligible for review. Such a proposal may contain
+field differences (`exact_content_match=0`). Missing complete snapshots and
+name-only matches cannot be submitted. Failed/no-match comparisons stay in
+local reports and do not create a proposal with an invented UUID.
+
+Ollama is advisory: `--with-ollama` enables it in automatic mode; `--no-ollama`
+disables it in other modes. A model failure is recorded and does not override
+the deterministic comparison. Review decisions do not automatically train models.
+
+## Delays, permissions and troubleshooting
+
+The ten-second request delay remains. The four idle settings are read from
+`seek_scrap_settings` in the configured database (`breaks.settings_id`, default 1).
+Before one elapsed hour, between-candidate breaks use `idle_less_than` to
+`idle_less_than2` seconds; at/after one hour, `idle_more_than` to `idle_more_than2`
+minutes. The per-process timer starts after sign-in, includes breaks, and does
+not reset after a long break. Invalid settings stop the run. Ctrl+C interrupts.
+The local settings helper SQL remains local-only; do not execute it as a remote
+migration. Existing settings do not need to be recreated.
+
+For routine collection, use SELECT on candidate/settings tables and SELECT/INSERT
+on review/history tables. Initialization additionally requires CREATE (including
+the history foreign key). Candidate UPDATE/INSERT/ALTER/DELETE permissions are
+not needed. A separate account for the future review app can have its own grants.
+MariaDB session timestamps are UTC. After an ambiguous connection/commit error,
+check the review queue before retrying; submission hashes prevent identical
+retries from resetting existing reviews.
+
+The review UI and approval/apply service are not part of this Python package.
+See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract.
+
+## Validation and changed files
+
+Run `python -m unittest discover -s tests -v`. This release passed 88 tests,
+including matching, browser-flow fakes, remote-service fixtures, idle timing,
+proposal/history transaction rollback, reviewer assignment and no candidate writes.
+SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL
+translated; MariaDB named locks, actual DDL/TLS and live SEEK were not tested here.
+See `VALIDATION.txt` for the actual test output and limits.
+
+Changed: `compare.py`, `repository.py`, both example configs, README, remote guide,
+and tests. Added: `review_schema.py`, `review_schema.sql`,
+`REVIEW_APP_CONTRACT.md`, `tests/test_review_cli.py`.
+The uploaded profile parser, browser, network settings and runtime-break logic
+are preserved. `seekid.txt` and `uuid.txt` are preserved from the uploaded package.

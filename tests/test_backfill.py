@@ -221,19 +221,19 @@ class LiveNumericTest(unittest.TestCase):
                 archive.assert_not_called()
             report=json.loads(next(Path(folder).rglob('42.json')).read_text())
         browser.login.assert_called_once(); browser.numeric_profile.assert_called_once_with(42)
-        browser.profile.assert_called_once(); repo.apply.assert_not_called()
+        browser.profile.assert_called_once(); repo.submit_proposal.assert_not_called()
         browser.close.assert_called_once()
         return browser,report
 
     def test_detail_target_can_read_live_numeric_profile_without_name_columns(self):
         browser,report=self.run_fixture(False,detail=True)
-        self.assertEqual(report['status'],'ready_for_review')
+        self.assertEqual(report['status'],'proposal_dry_run')
         self.assertEqual(report['target_table'],'seek_scrap_detail')
 
     def test_live_default_does_not_require_archived_html(self):
         browser,report=self.run_fixture(False)
         browser.search.assert_called_once_with('Alex Example')
-        self.assertEqual(report['status'],'ready_for_review')
+        self.assertEqual(report['status'],'proposal_dry_run')
         self.assertEqual(report['source']['mode'],'live_numeric')
         self.assertTrue(report['search_complete'])
 
@@ -339,8 +339,8 @@ class AutomaticWorkflowTest(unittest.TestCase):
         profile=strong_profile() if strong else extract_candidate_profile(FIXTURE)
         repo=Mock();repo.database='seek_uuid_test_unit'; repo.target_table='seek_scrap_detail';repo.ids.return_value=[42,43] if batch else [42]
         repo.rows.return_value=[{'id_pk':1,'id':42,'uuid':None,'name':'Alex Example','file':'','scrap_date':None}]
-        repo.apply.return_value=('22222222-2222-2222-2222-222222222222',1)
-        if conflict:repo.apply.side_effect=ValueError('Conflicting approved identity mapping')
+        repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}
+        if conflict:repo.submit_proposal.side_effect=ValueError('Conflicting approved identity mapping')
         repo.scrap_idle_settings.return_value = dict(idle_less_than=0, idle_less_than2=0, idle_more_than=0, idle_more_than2=0)
         browser=Mock();browser.numeric_profile.return_value=(profile,{'mode':'live_numeric'})
         browser.search.return_value=({UID:'https://au.employer.seek.com/talentsearch/profiles/'+UID},True,'')
@@ -356,32 +356,31 @@ class AutomaticWorkflowTest(unittest.TestCase):
 
     def test_automatic_save_records_reason_without_match_prompts(self):
         repo,report,browser=self.run_case(True,True)
-        repo.apply.assert_called_once()
+        repo.submit_proposal.assert_called_once()
         browser.profile.assert_called_once()
         self.assertEqual(report['profiles_not_visited'],1)
         self.assertEqual(report['target_table'],'seek_scrap_detail')
-        self.assertEqual(repo.apply.call_args.args[:2],(42,UID))
-        evidence=repo.apply.call_args.args[3]
-        self.assertEqual(evidence['review_mode'],'automatic')
-        self.assertIn('Automatic match',evidence['review_reason'])
-        self.assertEqual(report['status'],'saved')
+        self.assertEqual(repo.submit_proposal.call_args.args[:2],(42,UID))
+        evidence=repo.submit_proposal.call_args.args[3]
+        self.assertEqual(evidence['selection_mode'],'automatic_exact')
+        self.assertIn('Automatic match',evidence['selection_reason'])
+        self.assertEqual(report['status'],'submitted')
 
     def test_uncertain_match_skips_without_prompt(self):
         repo,report,browser=self.run_case(True,False)
-        repo.apply.assert_not_called();self.assertEqual(report['status'],'auto_skipped')
+        repo.submit_proposal.assert_not_called();self.assertEqual(report['status'],'auto_skipped')
 
     def test_automatic_preview_never_writes(self):
         repo,report,browser=self.run_case(False,True)
-        repo.apply.assert_not_called();self.assertEqual(report['status'],'auto_eligible_dry_run')
+        repo.submit_proposal.assert_not_called();self.assertEqual(report['status'],'auto_eligible_dry_run')
 
     def test_first_match_saves_then_moves_to_next_numeric_id(self):
         repo,report,browser=self.run_case(True,True,batch=True)
         self.assertEqual(browser.profile.call_count,2)
         self.assertEqual(browser.numeric_profile.call_args_list[1].args,(43,))
-        self.assertEqual(repo.apply.call_count,2)
-        self.assertEqual(repo.apply.call_args_list[1].args[:2],(43,UID))
-        # Fake repository verifies sequencing only; real repository collision tests
-        # separately prove one UUID cannot be saved for two different numeric IDs.
+        self.assertEqual(repo.submit_proposal.call_count,2)
+        self.assertEqual(repo.submit_proposal.call_args_list[1].args[:2],(43,UID))
+        # Proposals may share a UUID; the review app must resolve collisions before applying.
 
     def test_database_conflict_is_not_reported_as_saved(self):
         repo,report,browser=self.run_case(True,True,conflict=True)
