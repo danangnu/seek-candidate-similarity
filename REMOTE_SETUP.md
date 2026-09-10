@@ -67,7 +67,9 @@ python compare.py --config config.remote.json check-connections
 needs SELECT on candidate/settings tables and SELECT/INSERT on the two review
 tables. Setup also needs CREATE. No candidate UPDATE or ALTER grants are needed.
 
-Numeric IDs are read from `seek_scrap_detail.seekid_detail` by default. The existing
+Numeric IDs are read from `seek_scrap_detail.seekid_detail` by default.
+People are ordered by their latest `seek_scrap.date_updated` descending, joined
+by numeric SEEK ID; the collector also needs SELECT on `seek_scrap`. The existing
 `seek_scrap_id` may remain an integer parent link; Python never changes it.
 The old `prepare-detail` and `rollback` commands have been removed.
 `setup_local_scrap_settings.sql` targets the LOCAL test database and is not a

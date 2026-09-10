@@ -14,6 +14,19 @@ from profiles import extract_candidate_profile
 from test_backfill import FIXTURE, UID
 
 class ReviewCliTest(unittest.TestCase):
+    def test_database_order_survives_csv_filter_and_limit(self):
+        for use_csv in (False, True):
+            with self.subTest(csv=use_csv), tempfile.TemporaryDirectory() as folder:
+                repo=Mock();repo.database='test';repo.target_table='seek_scrap_detail'
+                repo.ids.return_value=[90,12,70,3];repo.rows.return_value=[]
+                repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
+                csv_file=Path(folder)/'ids.csv';csv_file.write_text('id\n3\n70\n90\n')
+                args=argparse.Namespace(apply=False,auto_save=True,id=None,csv=str(csv_file) if use_csv else None,
+                                        limit=2,no_ollama=True,uuid=None)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    run(args,{'created_by':'collector','report_dir':folder},repo)
+                self.assertEqual([c.args[0] for c in repo.rows.call_args_list],[90,70] if use_csv else [90,12])
+
     def test_new_and_legacy_flags_both_mean_proposals(self):
         for flags in (['--submit','--auto-propose'],['--apply','--auto-save']):
             with self.subTest(flags=flags), tempfile.TemporaryDirectory() as folder:

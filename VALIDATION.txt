@@ -39,7 +39,9 @@ test_scopes_roles_and_ignores_recommendations (test_backfill.ProfilesTest.test_s
 test_transaction_rolls_back_on_failure (test_backfill.ProfilesTest.test_transaction_rolls_back_on_failure) ... ok
 test_url_validation_and_token_exclusion (test_backfill.ProfilesTest.test_url_validation_and_token_exclusion) ... ok
 test_active_numeric_proposal_prevents_different_proposal (test_detail_repository.ReviewRepositoryTest.test_active_numeric_proposal_prevents_different_proposal) ... ok
+test_alternate_main_source_uses_latest_snapshot_date (test_detail_repository.ReviewRepositoryTest.test_alternate_main_source_uses_latest_snapshot_date) ... ok
 test_database_constraints_require_real_decision_metadata (test_detail_repository.ReviewRepositoryTest.test_database_constraints_require_real_decision_metadata) ... ok
+test_detail_queue_latest_profile_date_first_deduplicated_nulls_last (test_detail_repository.ReviewRepositoryTest.test_detail_queue_latest_profile_date_first_deduplicated_nulls_last) ... ok
 test_history_failure_rolls_back_proposal (test_detail_repository.ReviewRepositoryTest.test_history_failure_rolls_back_proposal) ... ok
 test_legacy_operator_does_not_become_reviewer (test_detail_repository.ReviewRepositoryTest.test_legacy_operator_does_not_become_reviewer) ... ok
 test_missing_full_snapshot_blocked (test_detail_repository.ReviewRepositoryTest.test_missing_full_snapshot_blocked) ... ok
@@ -68,6 +70,7 @@ test_wrong_database_or_missing_required_tls_is_rejected (test_remote_connections
 test_check_connections_never_mutates_database_or_opens_browser (test_remote_connections.RemoteWorkflowTest.test_check_connections_never_mutates_database_or_opens_browser) ... ok
 test_database_schema_failure_does_not_skip_ollama_diagnostic (test_remote_connections.RemoteWorkflowTest.test_database_schema_failure_does_not_skip_ollama_diagnostic) ... ok
 test_explicit_ollama_advice_does_not_override_exact_content_save (test_remote_connections.RemoteWorkflowTest.test_explicit_ollama_advice_does_not_override_exact_content_save) ... ok
+test_database_order_survives_csv_filter_and_limit (test_review_cli.ReviewCliTest.test_database_order_survives_csv_filter_and_limit) ... ok
 test_new_and_legacy_flags_both_mean_proposals (test_review_cli.ReviewCliTest.test_new_and_legacy_flags_both_mean_proposals) ... ok
 test_nonautomatic_mode_submits_without_operator_review_prompts (test_review_cli.ReviewCliTest.test_nonautomatic_mode_submits_without_operator_review_prompts) ... ok
 test_numeric_parent_link_is_compared_and_assignment_forwarded (test_review_cli.ReviewCliTest.test_numeric_parent_link_is_compared_and_assignment_forwarded) ... ok
@@ -88,7 +91,7 @@ test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.R
 test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
 
 ----------------------------------------------------------------------
-Ran 88 tests in 0.602s
+Ran 91 tests in 0.583s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -96,6 +99,13 @@ Checked 2 result cards; up to 1 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 different-name results.
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
+
+2026-09-10 latest-profile ordering update: 91 tests passed.
+Added checks for per-person MAX(date_updated), duplicate historical snapshots,
+NULL/missing history last, deterministic same-date ties, prior-review exclusion,
+alternate seek_scrap source, CSV order preservation and limit-after-filter.
+Ordering SQL executed using the SQLite adapter, not live MariaDB.
+No live database or SEEK browser was accessed.
 
 2026-09-09 review-queue update: 88 tests passed.
 Submission-only workflow, legacy/new CLI aliases, disabled mutation commands,

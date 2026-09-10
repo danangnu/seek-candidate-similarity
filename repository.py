@@ -126,6 +126,8 @@ class Repository:
                     columns = REVIEW_COLUMNS if table == 'seek_uuid_match_review' else HISTORY_COLUMNS
                     cur.execute('SELECT '+', '.join(columns)+' FROM '+table+' LIMIT 0')
             cur.execute('SELECT '+target_fields(target)+' FROM '+target+' LIMIT 0')
+            if 'seek_scrap' in tables:
+                cur.execute('SELECT id, date_updated FROM seek_scrap LIMIT 0')
 
     def initialize(self):
         self.preflight([self.target_table])
@@ -135,14 +137,20 @@ class Repository:
         self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
 
     def ids(self):
-        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_scrap'])
         t=TARGETS[self.target_table]
+        # A numeric person can have multiple historical snapshots. Rank the person
+        # by their newest profile date, not a row's insertion/scrape date or parent ID.
+        history_join = (' LEFT JOIN seek_scrap history ON history.id=s.seekid_detail'
+                        if self.target_table == 'seek_scrap_detail' else '')
+        profile_date = 'history.date_updated' if history_join else 's.date_updated'
         with self.connection.cursor() as cur:
-            # Existing parent links are irrelevant to proposal collection. Every
-            # previously submitted ID is excluded from normal batches, even rejected.
-            cur.execute(f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
+            cur.execute(f"SELECT s.{t['numeric']} AS id, MAX({profile_date}) AS latest_profile_updated "
+                        f"FROM {self.target_table} s{history_join} "
                         f"WHERE s.{t['numeric']} > 0 AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r "
-                        f"WHERE r.source_table=%s AND r.seekid_detail=s.{t['numeric']}) ORDER BY s.{t['numeric']}",
+                        f"WHERE r.source_table=%s AND r.seekid_detail=s.{t['numeric']}) "
+                        f"GROUP BY s.{t['numeric']} "
+                        "ORDER BY latest_profile_updated IS NULL ASC, latest_profile_updated DESC, id ASC",
                         (self.target_table,))
             return [r['id'] for r in cur.fetchall()]
 

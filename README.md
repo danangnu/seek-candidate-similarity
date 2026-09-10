@@ -123,6 +123,18 @@ The default source is numeric `seek_scrap_detail.seekid_detail`.
 is treated as existing source data, not a UUID and not a reason to skip collection.
 No conversion or new UUID column is required for this collector.
 
+Queue order is newest updated person first. For `seek_scrap_detail`, join
+`seek_scrap.id = seek_scrap_detail.seekid_detail` and use
+`MAX(seek_scrap.date_updated)` per person, descending. Multiple snapshots produce
+one numeric ID. Missing dates/missing history are placed last; equal dates use
+numeric ID ascending for a stable order. Python preserves this order through
+CSV filtering and applies `--limit` afterwards. An explicit `--id` selects only
+that person. The alternate `seek_scrap` source uses the same latest-date rule.
+This order reflects dates already stored in MariaDB at the start of the run,
+not a fresh live SEEK scan. The uploaded `date_updated` is a DATE column, so
+same-day updates cannot be ordered by time. Both source modes now require
+SELECT on `seek_scrap.id` and `seek_scrap.date_updated`; no schema change is needed.
+
 Normal batches exclude numeric IDs that already have ANY proposal in the same
 source table, including rejected proposals. An explicit `--id 260138` can
 investigate a previously submitted candidate. Identical profile evidence returns
@@ -178,7 +190,7 @@ See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 88 tests,
+Run `python -m unittest discover -s tests -v`. This release passed 91 tests,
 including matching, browser-flow fakes, remote-service fixtures, idle timing,
 proposal/history transaction rollback, reviewer assignment and no candidate writes.
 SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL

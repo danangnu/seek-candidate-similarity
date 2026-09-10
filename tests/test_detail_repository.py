@@ -67,9 +67,9 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.repo.connection=Connection();self.repo.preflight=Mock();self.repo.verify_connection=Mock()
         self.db=self.repo.connection.db
         self.db.executescript('''
-        CREATE TABLE seek_scrap (id_pk INTEGER PRIMARY KEY, id INTEGER, uuid TEXT, name TEXT, file TEXT, scrap_date TEXT);
+        CREATE TABLE seek_scrap (id_pk INTEGER PRIMARY KEY, id INTEGER, uuid TEXT, name TEXT, file TEXT, scrap_date TEXT, date_updated TEXT);
         CREATE TABLE seek_scrap_detail (id_detail INTEGER PRIMARY KEY, seekid_detail INTEGER UNIQUE, seek_scrap_id INTEGER, match_path_found TEXT);
-        INSERT INTO seek_scrap VALUES (1,42,'existing-main-value','Alex Example','',NULL);
+        INSERT INTO seek_scrap VALUES (1,42,'existing-main-value','Alex Example','',NULL,'2026-01-01');
         INSERT INTO seek_scrap_detail VALUES (100,42,12345,'preserve matching metadata');
         ''')
         self.repo.initialize()
@@ -79,6 +79,23 @@ class ReviewRepositoryTest(unittest.TestCase):
     def submit(self, evidence=None, uid=UID, numeric=42):
         return self.repo.submit_proposal(numeric,uid,fingerprint(self.repo.rows(numeric)),evidence or self.evidence,'collector','reviewer-one')
     def proposal(self):return dict(self.db.execute('SELECT * FROM seek_uuid_match_review').fetchone())
+    def test_detail_queue_latest_profile_date_first_deduplicated_nulls_last(self):
+        self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,?,NULL)',
+                            [(101,43,100),(102,44,101),(103,45,102),(104,46,103)])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
+                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,44,'2026-09-09'),
+                             (5,45,None),(6,42,'2026-09-09')])
+        # 46 has no seek_scrap row; keep it after dated people. Ties use numeric ID.
+        self.assertEqual(self.repo.ids(),[43,42,44,45,46])
+        self.submit(numeric=43)
+        self.assertEqual(self.repo.ids(),[42,44,45,46])
+
+    def test_alternate_main_source_uses_latest_snapshot_date(self):
+        self.repo.target_table='seek_scrap'
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
+                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,44,None)])
+        self.assertEqual(self.repo.ids(),[43,42,44])
+
     def test_pending_proposal_has_snapshots_assignment_and_no_approval(self):
         self.assertEqual(self.repo.ids(),[42])
         result=self.submit();row=self.proposal()
