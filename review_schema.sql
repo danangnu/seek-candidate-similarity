@@ -64,3 +64,20 @@ CREATE TABLE IF NOT EXISTS seek_uuid_match_review_history (
  CONSTRAINT ck_seek_review_history_action CHECK (action IN ('submitted','assigned','approved','rejected','applied'))
  */
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+
+-- Operational leases only. No candidate columns or review decisions are changed.
+CREATE TABLE IF NOT EXISTS seek_uuid_work_claim (
+ source_table VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ seekid_detail BIGINT NOT NULL,
+ claim_token CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ worker_id VARCHAR(160) NOT NULL,
+ claimed_by VARCHAR(100) NOT NULL,
+ state VARCHAR(20) NOT NULL,
+ claimed_at DATETIME NOT NULL,
+ heartbeat_at DATETIME NOT NULL,
+ expires_at DATETIME NOT NULL,
+ last_result VARCHAR(64) NULL,
+ PRIMARY KEY (source_table, seekid_detail),
+ KEY ix_seek_claim_expiry (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

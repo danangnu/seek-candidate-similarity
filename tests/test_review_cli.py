@@ -75,7 +75,9 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(repo.submit_proposal.call_args.args[-2:],('collector','human-reviewer'))
         self.assertEqual(report['review_status'],'pending');self.assertEqual(report['candidate_rows_updated'],0)
         self.assertNotIn('reviewed_by',report);repo.apply.assert_not_called()
-        repo.preflight.assert_called_once_with(['seek_uuid_match_review','seek_uuid_match_review_history'])
+        repo.preflight.assert_called_once_with(['seek_uuid_match_review','seek_uuid_match_review_history','seek_uuid_work_claim'])
+        self.assertEqual(repo.submit_proposal.call_args.kwargs['claim_token'],repo.start_claim_lease.return_value.token)
+        repo.start_claim_lease.return_value.close.assert_called_once()
     def test_nonautomatic_mode_submits_without_operator_review_prompts(self):
         repo,_,report,_=self.execute(auto=False)
         self.assertEqual(report['status'],'submitted')

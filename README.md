@@ -9,9 +9,9 @@ The separate review app will approve/reject and apply approved mappings later.
 
 Stop older running copies first. Replace the application files with this package,
 including `repository.py`, `review_schema.py` and the latest `review_schema.sql`. Keep your actual
-configuration and reports. Seven application modules are included:
+configuration and reports. Eight application modules are included:
 `compare.py`, `repository.py`, `profiles.py`, `seek_browser.py`,
-`runtime_breaks.py`, `network_config.py`, and `review_schema.py`.
+`runtime_breaks.py`, `network_config.py`, `review_schema.py`, and `work_claims.py`.
 
 ```powershell
 pip install -r requirements.txt
@@ -36,7 +36,8 @@ the separate app must resolve staff IDs against its authenticated user directory
 For remote servers use [REMOTE_SETUP.md](REMOTE_SETUP.md). The commands below use
 `config.remote.json`; omit `--config config.remote.json` to use `config.json`.
 
-Create only the two review tables in the configured database, then check:
+Run setup once in the shared database to create missing review tables and the
+new `seek_uuid_work_claim` table, then check:
 
 ```powershell
 python compare.py --config config.remote.json init-db
@@ -80,9 +81,9 @@ python compare.py --config config.remote.json run --limit 1000000 --submit --aut
 
 | Old command/flag | Current behavior |
 | --- | --- |
-| `--apply` | Alias for `--submit`: pending review inserts only |
+| `--apply` | Alias for `--submit`: work claims and pending proposals |
 | `--auto-save` | Alias for `--auto-propose`: select first identical full Profile match |
-| `init-db` | Creates review queue/history only |
+| `init-db` | Creates review queue/history and work claims |
 | `prepare-detail` | Removed; no candidate schema changes |
 | `rollback` | Removed; candidate correction belongs to the review app |
 
@@ -191,7 +192,8 @@ Without `--auto-propose`, Python compares the available candidates and proposes
 the strongest comparison eligible for review. Such a proposal may contain
 field differences (`exact_content_match=0`). Missing complete snapshots and
 name-only matches cannot be submitted. Failed/no-match comparisons stay in
-local reports and do not create a proposal with an invented UUID.
+local reports and do not create a proposal with an invented UUID. Submit runs
+record their outcome and retry time in the work-claim table.
 
 Ollama is advisory: `--with-ollama` enables it in automatic mode; `--no-ollama`
 disables it in other modes. A model failure is recorded and does not override
@@ -209,7 +211,8 @@ The local settings helper SQL remains local-only; do not execute it as a remote
 migration. Existing settings do not need to be recreated.
 
 For routine collection, use SELECT on candidate/settings tables and SELECT/INSERT
-on review/history tables. Initialization additionally requires CREATE (including
+on review/history tables, plus SELECT/INSERT/UPDATE on `seek_uuid_work_claim`.
+Initialization additionally requires CREATE (including
 the history foreign key). Candidate UPDATE/INSERT/ALTER/DELETE permissions are
 not needed. A separate account for the future review app can have its own grants.
 MariaDB session timestamps are UTC. After an ambiguous connection/commit error,
@@ -219,17 +222,44 @@ retries from resetting existing reviews.
 The review UI and approval/apply service are not part of this Python package.
 See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract.
 
+## Multiple machines
+
+All submitting machines must use this updated version and the same database
+server, database name and target_table. Run `init-db` once after updating. Claims
+are automatic with `--submit`/`--apply`; no extra run flag is required. Each
+process gets its own machine/process/run identifier, separate from `created_by`.
+
+A worker reserves each numeric person before opening their profile. Other
+workers skip reserved people and keep looking until they reach their own limit.
+The reservation lasts 10 minutes and is renewed every minute on a separate DB
+connection, including during login, delays, Ollama calls and long runtime breaks.
+No database transaction is held for the duration of scraping.
+
+A crashed worker's claim becomes available after renewal stops and expiry passes.
+A lost claim blocks further guarded browser actions and proposal submission.
+Ctrl+C attempts immediate release; unmatched/failed attempts normally wait one
+hour before retry. Skipped/expired people may be picked up in a subsequent run;
+a run exits when its available queue is exhausted, rather than waiting forever.
+Dry runs do not claim or write anything, so simultaneous previews may overlap.
+
+See [MULTI_MACHINE.md](MULTI_MACHINE.md) for setup, permissions, monitoring,
+optional settings and the limits of expiry during network failures.
+
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 104 tests,
-including matching, browser-flow fakes, remote-service fixtures, idle timing,
-proposal/history transaction rollback, reviewer assignment and no candidate writes.
-SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL
-translated; MariaDB named locks, actual DDL/TLS and live SEEK were not tested here.
-See `VALIDATION.txt` for the actual test output and limits.
+Run `python -m unittest discover -s tests -v`. This release passed 127 tests.
+Claim tests cover competing workers, expiry/takeover, stale-token submission,
+renewal, retry delays, interruption cleanup, queue filtering, no unclaimed browser
+work, limit-after-claim behavior and read-only previews. Existing profile,
+submission, ordering and break checks remain passing.
+The two-connection race test uses SQLite plus an emulated advisory mutex; this
+is not a real MariaDB concurrency/load test. No live SEEK or database was accessed.
+See `VALIDATION.txt` for test output and limitations.
 
-Changed: `compare.py`, `repository.py`, both example configs, README, remote guide,
-and tests. Added: `review_schema.py`, `review_schema.sql`,
-`REVIEW_APP_CONTRACT.md`, `tests/test_review_cli.py`.
-The uploaded profile parser, browser, network settings and runtime-break logic
-are preserved. `seekid.txt` and `uuid.txt` are preserved from the uploaded package.
+Changed in this update: `compare.py`, `repository.py`, `seek_browser.py`,
+`review_schema.py`, `review_schema.sql`, both example configs, documentation,
+`tests/test_detail_repository.py` and `tests/test_review_cli.py`.
+Added: `work_claims.py`, `tests/test_work_claims.py` and `MULTI_MACHINE.md`.
+Profile matching, the confirmed history-to-detail join, candidate read-only
+behavior and runtime break settings remain in place. Uploaded sample files are
+preserved.

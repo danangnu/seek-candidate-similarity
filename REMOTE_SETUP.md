@@ -6,9 +6,9 @@ servers. No remote server has been configured or contacted on your behalf.
 
 ## Install and configure
 
-Stop the old run. Copy all seven application files from this package into your
+Stop the old run. Copy all eight application files from this package into your
 existing folder: `compare.py`, `repository.py`, `profiles.py`, `seek_browser.py`,
-`runtime_breaks.py`, `network_config.py`, and `review_schema.py`. Also copy
+`runtime_breaks.py`, `network_config.py`, `review_schema.py`, and `work_claims.py`. Also copy
 `review_schema.sql` next to them. Keep your reports and existing
 `config.json`. In your activated Python environment:
 
@@ -49,23 +49,23 @@ Put `--config` BEFORE the subcommand in every command:
 python compare.py --config config.remote.json check-connections
 ```
 
-This checks the selected database, read-only source columns, review queue/history tables,
+This checks the selected database, read-only source columns, review queue/history and work-claim tables,
 break settings and whether Ollama lists your model. It does not open Chrome,
 send candidate profiles, generate model responses or write database records.
 An available-model check does not guarantee the server has enough memory for
 inference. `--no-ollama` on this command checks MariaDB only.
 
-If only the review queue/history tables are missing, create them explicitly:
+Run setup once after this update to create missing review/work-claim tables:
 
 ```powershell
 python compare.py --config config.remote.json init-db
 python compare.py --config config.remote.json check-connections
 ```
 
-`init-db` creates only `seek_uuid_match_review` and
-`seek_uuid_match_review_history` in the configured database. Routine collection
+`init-db` creates `seek_uuid_match_review`, `seek_uuid_match_review_history`
+and `seek_uuid_work_claim` in the configured database. Routine collection
 needs SELECT on candidate/settings tables and SELECT/INSERT on the two review
-tables. Setup also needs CREATE. No candidate UPDATE or ALTER grants are needed.
+tables, plus SELECT/INSERT/UPDATE on `seek_uuid_work_claim`. Setup also needs CREATE. No candidate UPDATE or ALTER grants are needed.
 
 Numeric IDs are read from `seek_scrap_detail.seekid_detail` by default.
 People are ordered by their latest `seek_scrap.date_updated` descending, joined
@@ -147,3 +147,6 @@ firewall; database access denied means check account, password and allowed clien
 host; missing model means install/select the model on the REMOTE Ollama server.
 If a long database pause occurs, the connection is refreshed outside the write
 transaction before reading settings again.
+
+For simultaneous workers, update every machine and use the same shared database
+and target_table. Work claims are automatic with --submit; see MULTI_MACHINE.md.

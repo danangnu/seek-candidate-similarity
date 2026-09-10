@@ -10,6 +10,7 @@ from profiles import extract_candidate_profile, read_html, compare_evidence, com
 from repository import Repository, fingerprint, review_actors
 from runtime_breaks import RuntimeBreaks, BreakSettingsError, validate_settings
 from network_config import ollama_options, check_ollama
+from work_claims import ClaimLost, claim_settings, worker_identity
 
 
 def resolve_file(value, config):
@@ -70,13 +71,18 @@ def write_report(folder, numeric_id, report):
 def run(args, config, repo):
     from seek_browser import SeekBrowser
     created_by, assigned_reviewer = review_actors(config)
-    print('Review-only mode: database writes create pending proposals; candidate tables are never updated.')
+    print('Review-only mode: submit runs write work claims and pending proposals; candidate tables are never updated.')
     use_ollama = not args.no_ollama and (not getattr(args, 'auto_save', False) or getattr(args, 'with_ollama', False))
     if getattr(args, 'auto_save', False):
         print('Automatic policy: first_identical_profile_content_v2 (first exact content match)')
     print('Ollama advisory:', 'enabled' if use_ollama else 'disabled')
+    settings = claim_settings(config)
+    worker_id = worker_identity()
     if args.apply:
-        repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
+        repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'])
+        print('Shared work claims enabled | worker:', worker_id)
+    else:
+        print('Dry run: no work claims or database writes; simultaneous previews may overlap.')
     source_mode = config.get('source_mode', 'live_numeric')
     if source_mode not in ('live_numeric', 'saved_html'):
         raise ValueError('source_mode must be live_numeric or saved_html')
@@ -84,30 +90,48 @@ def run(args, config, repo):
         raise ValueError('The detail target requires source_mode live_numeric; it has no name or saved HTML columns')
     from itertools import chain, islice
     csv_selection = set(csv_ids(args.csv)) if args.csv else None
-    queue = iter([args.id]) if args.id else iter(repo.iter_ids(limit=args.limit, candidate_ids=csv_selection))
+    queue = (iter([args.id]) if args.id else
+             iter(repo.iter_ids(limit=None, candidate_ids=csv_selection, exclude_claimed=True)) if args.apply else
+             iter(repo.iter_ids(limit=args.limit, candidate_ids=csv_selection)))
     first_id = next(queue, None)
-    ids = chain([first_id], islice(queue, args.limit-1)) if first_id is not None else ()
+    ids = chain([first_id], queue if args.apply else islice(queue, args.limit-1)) if first_id is not None else ()
     breaks = RuntimeBreaks(created_by, repo.scrap_idle_settings,
                            config.get('breaks', {}).get('settings_id', 1)) if first_id is not None else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
+    attempted = 0
     try:
         for numeric_id in ids:
+            lease = None
+            if args.apply:
+                lease = repo.start_claim_lease(numeric_id, worker_id, created_by, settings, allow_rejected=bool(args.id))
+                if lease is None:
+                    print('Skipped numeric SEEK ID', numeric_id, '| already reviewed, reserved, or awaiting retry.')
+                    continue
+                print('Claimed numeric SEEK ID', numeric_id, '| worker:', worker_id)
+            attempted += 1
             report = {'numeric_seek_id': numeric_id, 'database': repo.database,
                       'target_table': repo.target_table, 'database_host': config.get('database', {}).get('host'), 'status': 'unresolved', 'created_by': created_by,
-                      'assigned_reviewer': assigned_reviewer, 'storage_table': 'seek_uuid_match_review'}
+                      'assigned_reviewer': assigned_reviewer, 'storage_table': 'seek_uuid_match_review',
+                      'worker_id': worker_id if lease else None}
             try:
+                if lease:
+                    lease.check()
                 rows = repo.rows(numeric_id)
                 if not rows:
                     raise ValueError('Numeric ID is not present in the configured '+repo.target_table+'; check the selected database and candidate sample')
                 if browser is None:
                     browser = SeekBrowser(config.get('browser', {}))
+                    browser.claim_guard = lease.check if lease else None
                     browser.login()
                     breaks.start()
+                browser.claim_guard = lease.check if lease else None
                 report['stage'] = 'runtime_break'
                 report['runtime_break'] = breaks.before_candidate()
                 # The wait may exceed the database idle timeout. Refresh outside any write transaction.
                 breaks.refresh()
+                if lease:
+                    lease.check()
                 rows = repo.rows(numeric_id)
                 if not rows:
                     raise ValueError('Numeric ID disappeared from the configured target during the break')
@@ -158,6 +182,8 @@ def run(args, config, repo):
                         candidate['profile'] = profile
                         candidate['evidence'] = compare_evidence(old, profile)
                         if use_ollama:
+                            if lease:
+                                lease.check()
                             try:
                                 candidate['ollama'] = compare_profiles_with_ollama(old, profile,
                                     **ollama_options(config.get('ollama', {})))
@@ -165,6 +191,8 @@ def run(args, config, repo):
                                 candidate['ollama_error'] = type(ex).__name__
                         print('  Compared', uid, '| rank', candidate['evidence']['rank'],
                               '| identical Profile content:', candidate['evidence']['profile_content_equal'])
+                    except ClaimLost:
+                        raise
                     except Exception as ex:
                         # Selenium errors may embed token-bearing URLs: do not serialize them.
                         candidate['capture_error'] = type(ex).__name__
@@ -174,6 +202,8 @@ def run(args, config, repo):
                         if decision['eligible']:
                             print('  Exact Profile content match found; stopping further candidate profile visits.')
                             break
+                if lease:
+                    lease.check()
                 report['profiles_not_visited'] = len(links) - len(report['candidates'])
                 report['profiles_compared'] = sum('evidence' in c for c in report['candidates'])
                 if not getattr(args, 'auto_save', False) and any('capture_error' in c for c in report['candidates']):
@@ -210,7 +240,7 @@ def run(args, config, repo):
                     report['status'] = 'auto_eligible_dry_run' if getattr(args, 'auto_save', False) else 'proposal_dry_run'
                     print('Would submit pending proposal', selected['uuid'], '(dry run; add --submit).')
                 else:
-                    evidence = {'source': source, 'old_profile': old, 'selected': selected,
+                    evidence = {'worker_id': worker_id, 'source': source, 'old_profile': old, 'selected': selected,
                                 'comparison_scope': comparison_scope, 'search_complete': report['search_complete'],
                                 'profiles_not_visited': report['profiles_not_visited'],
                                 'search_scan': report.get('search_scan'), 'runtime_break': report.get('runtime_break'),
@@ -222,8 +252,9 @@ def run(args, config, repo):
                                                      'rank': c['evidence']['rank'],
                                                      'name_equal': c['evidence']['name_equal']} for c in ordered if 'evidence' in c]}
                     report['stage'] = 'submitting_review_proposal'
+                    lease.check()
                     result = repo.submit_proposal(numeric_id, selected['uuid'], fingerprint(rows), evidence,
-                                                  created_by, assigned_reviewer)
+                                                  created_by, assigned_reviewer, claim_token=lease.token)
                     report.update({'status': 'submitted' if result['created'] else 'already_submitted',
                                    'review_id': result['review_id'], 'review_status': result['status'],
                                    'candidate_rows_updated': 0, 'assigned_reviewer': result.get('assigned_reviewer')})
@@ -231,6 +262,10 @@ def run(args, config, repo):
                           '| review ID:', result['review_id'], '| status:', result['status'],
                           '| assigned reviewer:', result.get('assigned_reviewer') or '(unassigned)', '| candidate rows updated: 0')
                 write_report(folder, numeric_id, report)
+            except ClaimLost as ex:
+                report.update(status='stopped_claim_lost', reason=str(ex))
+                write_report(folder, numeric_id, report)
+                raise
             except BreakSettingsError as ex:
                 report.update(status='stopped_invalid_break_settings', reason=str(ex))
                 write_report(folder, numeric_id, report)
@@ -249,6 +284,22 @@ def run(args, config, repo):
                     print('Unresolved:', type(ex).__name__, '| stage:', report.get('stage', 'setup'),
                           '(proposal not confirmed; check review tables and browser/database)')
                 write_report(folder, numeric_id, report)
+            finally:
+                if browser:
+                    browser.claim_guard = None
+                if lease:
+                    import sys
+                    interrupted = isinstance(sys.exc_info()[1], KeyboardInterrupt)
+                    stopped = lease.close()
+                    try:
+                        if stopped:
+                            repo.finish_claim(numeric_id, lease.token,
+                                              0 if interrupted else settings['retry_seconds'],
+                                              'interrupted' if interrupted else report['status'])
+                    except Exception:
+                        print('Claim cleanup not confirmed; it will become retryable after expiry.')
+            if attempted >= args.limit:
+                break
     finally:
         if browser:
             browser.close()
@@ -259,7 +310,7 @@ def check_connections(config, repo, no_ollama=False):
     failures = []
     checks = [
         ('Candidate source and profile dates (read-only)', lambda: repo.preflight([repo.target_table, 'seek_scrap'])),
-        ('Review queue and history tables', lambda: repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])),
+        ('Review queue, history and work claims', lambda: repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'])),
         ('Runtime break settings', lambda: validate_settings(repo.scrap_idle_settings(config.get('breaks', {}).get('settings_id', 1))))]
     if not no_ollama:
         checks.append(('Ollama endpoint and model', lambda: check_ollama(**ollama_options(config.get('ollama', {})))))
@@ -281,12 +332,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='config.json')
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('init-db', help='Create review queue/history tables only in the configured database')
+    sub.add_parser('init-db', help='Create review queue/history and work-claim tables only in the configured database')
     check = sub.add_parser('check-connections', help='Read-only database/schema/settings and Ollama-model checks; no Chrome or writes')
     check.add_argument('--no-ollama', action='store_true')
     queue_check = sub.add_parser('check-queue', help='Read-only queue timing and optional EXPLAIN; no browser or writes')
     queue_check.add_argument('--limit', type=int, default=5)
     queue_check.add_argument('--explain', action='store_true')
+    queue_check.add_argument('--available-only', action='store_true',
+                             help='Also exclude live work claims and retry delays; still read-only')
     runner = sub.add_parser('run', help='Compare and propose for review; dry run unless --submit')
     runner.add_argument('--submit', '--apply', dest='apply', action='store_true',
                         help='Submit pending proposals ONLY; --apply is a compatibility alias, never a candidate update')
@@ -337,12 +390,12 @@ def main():
             if args.explain:
                 repo.explain_queue()
             start = time.monotonic()
-            for numeric_id in repo.iter_ids(limit=args.limit):
+            for numeric_id in repo.iter_ids(limit=args.limit, exclude_claimed=args.available_only):
                 print('Queued numeric ID:', numeric_id)
             print('Queue check elapsed seconds:', round(time.monotonic()-start, 3))
             print('No browser session or database writes.')
         elif args.command == 'init-db':
-            repo.initialize(); print('Review queue and history tables ready. Candidate tables unchanged.')
+            repo.initialize(); print('Review queue, history and work-claim tables ready. Candidate tables unchanged.')
         else:
             run(args, config, repo)
     finally:
@@ -354,6 +407,9 @@ if __name__ == '__main__':
         main()
     except KeyboardInterrupt:
         print('\nStopped. Any submitted proposals remain pending in the review queue.')
+    except ClaimLost as error:
+        print('Stopped:', str(error))
+        raise SystemExit(1)
     except Exception as error:
         print('Stopped:', str(error) if isinstance(error, (ValueError, BreakSettingsError)) else type(error).__name__)
         if error.args and type(error.args[0]) is int:

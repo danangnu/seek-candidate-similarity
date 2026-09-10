@@ -65,7 +65,7 @@ test_queue_skips_reviewed_and_non_detail_people_before_applying_limit (test_deta
 test_rejected_changed_evidence_allows_explicit_resubmission (test_detail_repository.ReviewRepositoryTest.test_rejected_changed_evidence_allows_explicit_resubmission) ... ok
 test_repeated_submission_keeps_assignment_and_one_history_event (test_detail_repository.ReviewRepositoryTest.test_repeated_submission_keeps_assignment_and_one_history_event) ... ok
 test_replay_does_not_reset_rejected_review (test_detail_repository.ReviewRepositoryTest.test_replay_does_not_reset_rejected_review) ... ok
-test_schema_init_creates_only_two_review_tables (test_detail_repository.ReviewRepositoryTest.test_schema_init_creates_only_two_review_tables) ... ok
+test_schema_init_creates_two_review_tables_and_claims (test_detail_repository.ReviewRepositoryTest.test_schema_init_creates_two_review_tables_and_claims) ... ok
 test_shared_uuid_can_be_proposed_for_review_without_assigning_identity (test_detail_repository.ReviewRepositoryTest.test_shared_uuid_can_be_proposed_for_review_without_assigning_identity) ... ok
 test_source_change_blocks_stale_submission (test_detail_repository.ReviewRepositoryTest.test_source_change_blocks_stale_submission) ... ok
 test_gateway_key_requires_https (test_remote_connections.OllamaHTTPTest.test_gateway_key_requires_https) ... ok
@@ -102,9 +102,32 @@ test_short_break_counts_towards_run_duration (test_runtime_breaks.RuntimeBreakTe
 test_timer_starts_after_login_and_first_candidate_has_no_break (test_runtime_breaks.RuntimeBreakTest.test_timer_starts_after_login_and_first_candidate_has_no_break) ... ok
 test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.RuntimeBreakTest.test_under_hour_uses_seconds_and_both_inclusive_endpoints) ... ok
 test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
+test_claim_queue_exclusion_for_dated_csv_and_undated (test_work_claims.ClaimSQLTest.test_claim_queue_exclusion_for_dated_csv_and_undated) ... ok
+test_expired_claim_can_be_taken_but_stale_owner_cannot_save_renew_or_release (test_work_claims.ClaimSQLTest.test_expired_claim_can_be_taken_but_stale_owner_cannot_save_renew_or_release) ... ok
+test_expired_token_cannot_submit_even_before_takeover (test_work_claims.ClaimSQLTest.test_expired_token_cannot_submit_even_before_takeover) ... ok
+test_only_one_worker_can_claim_person_and_source_is_unchanged (test_work_claims.ClaimSQLTest.test_only_one_worker_can_claim_person_and_source_is_unchanged) ... ok
+test_renewal_protects_long_running_work_and_does_not_resurrect_expired_work (test_work_claims.ClaimSQLTest.test_renewal_protects_long_running_work_and_does_not_resurrect_expired_work) ... ok
+test_retry_cooldown_and_interrupt_release (test_work_claims.ClaimSQLTest.test_retry_cooldown_and_interrupt_release) ... ok
+test_review_created_between_queue_read_and_claim_is_skipped (test_work_claims.ClaimSQLTest.test_review_created_between_queue_read_and_claim_is_skipped) ... ok
+test_successful_submission_is_fenced_and_blocks_future_claims (test_work_claims.ClaimSQLTest.test_successful_submission_is_fenced_and_blocks_future_claims) ... ok
+test_two_connections_racing_acquire_only_one_claim (test_work_claims.ClaimSQLTest.test_two_connections_racing_acquire_only_one_claim) ... ok
+test_available_queue_check_is_read_only (test_work_claims.ClaimWorkflowTest.test_available_queue_check_is_read_only) ... ok
+test_claim_contention_does_not_consume_limit_and_no_unclaimed_scrape (test_work_claims.ClaimWorkflowTest.test_claim_contention_does_not_consume_limit_and_no_unclaimed_scrape) ... ok
+test_claim_loss_inside_uuid_capture_is_not_swallowed (test_work_claims.ClaimWorkflowTest.test_claim_loss_inside_uuid_capture_is_not_swallowed) ... ok
+test_direct_id_already_claimed_does_not_open_chrome (test_work_claims.ClaimWorkflowTest.test_direct_id_already_claimed_does_not_open_chrome) ... ok
+test_dry_run_does_not_claim_or_update_coordination_tables (test_work_claims.ClaimWorkflowTest.test_dry_run_does_not_claim_or_update_coordination_tables) ... ok
+test_interrupt_during_login_releases_claim_immediately (test_work_claims.ClaimWorkflowTest.test_interrupt_during_login_releases_claim_immediately) ... ok
+test_lost_claim_stops_run_before_any_profile_or_submission (test_work_claims.ClaimWorkflowTest.test_lost_claim_stops_run_before_any_profile_or_submission) ... ok
+test_claim_settings_validate_and_worker_ids_are_unique (test_work_claims.LeaseTest.test_claim_settings_validate_and_worker_ids_are_unique) ... ok
+test_guard_checks_after_delay_before_browser_navigation (test_work_claims.LeaseTest.test_guard_checks_after_delay_before_browser_navigation) ... ok
+test_heartbeat_database_failure_sets_lost_and_closes_its_connection (test_work_claims.LeaseTest.test_heartbeat_database_failure_sets_lost_and_closes_its_connection) ... ok
+test_heartbeat_extends_deadline_during_login_or_break (test_work_claims.LeaseTest.test_heartbeat_extends_deadline_during_login_or_break) ... ok
+test_machine_sleep_past_deadline_fails_closed_without_renewal (test_work_claims.LeaseTest.test_machine_sleep_past_deadline_fails_closed_without_renewal) ... ok
+test_real_heartbeat_thread_uses_its_own_connection_and_closes (test_work_claims.LeaseTest.test_real_heartbeat_thread_uses_its_own_connection_and_closes) ... ok
+test_slow_response_does_not_resurrect_local_lease (test_work_claims.LeaseTest.test_slow_response_does_not_resurrect_local_lease) ... ok
 
 ----------------------------------------------------------------------
-Ran 104 tests in 0.612s
+Ran 127 tests in 0.658s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -113,13 +136,15 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-2026-09-10 confirmed history-to-detail relationship update: 104 tests passed.
-Default detail source joins seek_scrap.seek_scrap_id to seek_scrap_detail.id_detail
-and reads seek_scrap_detail.seekid_detail. Tests cover conflicting legacy IDs,
-orphan/null links across pages, linked undated inclusion, unlinked exclusion,
-CSV dates, prior review exclusion, deduplication, lazy limits and candidate
-UUID/link preservation. Alternate main-source mode retains legacy behavior.
-SQL tests use SQLite adapters, not a live MariaDB 10.1 server. No production
-latency, MariaDB optimizer plan, remote service or live SEEK session was tested.
-No live database was contacted; no candidate records were changed.
-Python syntax and example JSON configurations validated.
+Shared work claims update: 127 tests passed.
+SQL tests translate MariaDB syntax to SQLite. The two-connection race test
+emulates GET_LOCK with a shared mutex; this does not validate MariaDB's real
+named locks, server parsing, isolation or production performance.
+Tested claim acquisition, retry cooldown, expiry/takeover, stale-owner fencing,
+renewal during long operations, actual heartbeat-thread lifecycle, interruption,
+claim-loss propagation, limit after successful claim, read-only previews/checks,
+existing matching rules, transaction rollback and candidate preservation.
+Python compilation and example JSON configurations validated.
+No real database, candidate records, remote service or live SEEK session accessed.
+Deployment requires init-db for the new claim table, runtime claim permissions,
+and updating every worker before simultaneous runs. See MULTI_MACHINE.md.

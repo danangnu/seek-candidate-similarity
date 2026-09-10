@@ -35,9 +35,15 @@ class Cursor:
     def execute(self,sql,params=()):
         self.connection.statements.append(sql)
         self.synthetic=None
-        if 'GET_LOCK' in sql:self.synthetic=[{'acquired':1}];return
+        if 'GET_LOCK' in sql:
+            if self.connection.named_lock is not None:
+                self.connection.named_lock.acquire(timeout=5)
+            self.synthetic=[{'acquired':1}];return
+        if 'RELEASE_LOCK' in sql and self.connection.named_lock is not None:
+            self.connection.named_lock.release()
         if 'RELEASE_LOCK' in sql or sql.startswith('SET TRANSACTION'):self.synthetic=[];return
         if sql.startswith('CREATE TABLE'):sql=sqlite_ddl(sql)
+        sql=sql.replace('TIMESTAMPADD(SECOND,', "TIMESTAMPADD('SECOND',")
         sql=re.sub(r' FORCE INDEX \([a-z_]+\)', '', sql)
         self.cur.execute(sql.replace('%s','?').replace(' FOR UPDATE',''),params)
     def fetchone(self):
@@ -52,9 +58,14 @@ class Cursor:
 
 
 class Connection:
-    def __init__(self):
-        self.db=sqlite3.connect(':memory:',isolation_level=None);self.db.row_factory=sqlite3.Row
+    def __init__(self, path=':memory:', named_lock=None):
+        self.named_lock = named_lock
+        self.db=sqlite3.connect(path,isolation_level=None,check_same_thread=False);self.db.row_factory=sqlite3.Row
         self.db.create_function('CHAR_LENGTH',1,len)
+        from datetime import datetime, timedelta
+        self.now = datetime(2026, 9, 10, 0, 0, 0)
+        self.db.create_function('UTC_TIMESTAMP',0,lambda: self.now.strftime('%Y-%m-%d %H:%M:%S'))
+        self.db.create_function('TIMESTAMPADD',3,lambda unit,seconds,value: (datetime.fromisoformat(value)+timedelta(seconds=seconds)).strftime('%Y-%m-%d %H:%M:%S'))
         self.db.execute('PRAGMA foreign_keys=ON')
         self.statements=[]
     def cursor(self):return Cursor(self)
@@ -179,8 +190,8 @@ class ReviewRepositoryTest(unittest.TestCase):
                     "UPDATE seek_uuid_match_review SET status='invented'",
                     "UPDATE seek_uuid_match_review SET numeric_profile_snapshot='invalid json'"]:
             with self.subTest(sql=sql),self.assertRaises(sqlite3.IntegrityError):self.db.execute(sql)
-    def test_schema_init_creates_only_two_review_tables(self):
-        self.assertEqual(len(schema_statements()),2)
+    def test_schema_init_creates_two_review_tables_and_claims(self):
+        self.assertEqual(len(schema_statements()),3)
         self.repo.initialize()
         tables={r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         self.assertNotIn('seek_candidate_identity_map',tables);self.assertNotIn('seek_uuid_backfill_audit',tables)

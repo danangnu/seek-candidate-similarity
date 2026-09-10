@@ -26,5 +26,10 @@
   "created_by": "dnurdiansyah",
   "review": {
     "assigned_reviewer": null
+  },
+  "claims": {
+    "lease_seconds": 600,
+    "heartbeat_seconds": 60,
+    "retry_seconds": 3600
   }
 }

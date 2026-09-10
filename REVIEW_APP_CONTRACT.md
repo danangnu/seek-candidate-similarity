@@ -133,5 +133,16 @@ add those in a separately reviewed migration if required.
 
 Primary/unique keys and the history foreign key remain in the 10.1-compatible
 DDL. The unique submission hash prevents duplicate proposals; the foreign key
-prevents orphaned history. The SQL contains only two CREATE TABLE IF NOT EXISTS
-statements, selects no database, and never alters existing candidate tables.
+prevents orphaned history. The SQL contains three CREATE TABLE IF NOT EXISTS
+statements (two review tables and one operational claim table), selects no database, and never alters existing candidate tables.
+
+
+## Collector work claims
+
+`seek_uuid_work_claim` coordinates collectors before scraping. Its primary key
+is `(source_table, seekid_detail)`. It contains worker ownership, heartbeat/expiry,
+and the last processing outcome. It is not the review queue and does not assign
+or approve candidate identity. The review application should continue reading
+`seek_uuid_match_review` and `seek_uuid_match_review_history` for decisions.
+Do not edit an active collector token or extend/delete its claim from the review
+UI. The collector includes `worker_id` in new proposal comparison evidence.

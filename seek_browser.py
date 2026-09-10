@@ -38,13 +38,21 @@ class SeekBrowser:
             raise ValueError('browser.delay_seconds must be a number from 0 to 300')
         return seconds
 
+    def ensure_claim(self):
+        guard = getattr(self, 'claim_guard', None)
+        if guard is not None:
+            guard()
+
     def pause(self, action):
+        self.ensure_claim()
         seconds = self.delay_seconds
         if seconds:
             print(f'Waiting {seconds:g} seconds before {action}... (Ctrl+C to stop)')
             time.sleep(seconds)
+        self.ensure_claim()
 
     def close_intro(self):
+        self.ensure_claim()
         from selenium.common.exceptions import StaleElementReferenceException, ElementClickInterceptedException
         try:
             for button in self.driver.find_elements('css selector', "#intro-basic-search-dialog button[aria-label='Close']"):
@@ -55,13 +63,16 @@ class SeekBrowser:
             pass
 
     def login(self):
+        self.ensure_claim()
         self.driver.get(BASE+'/talentsearch/keyword?market=AU')
         input('Sign in to SEEK in Chrome, complete any verification, then press Enter here. ')
+        self.ensure_claim()
         if not self.driver.current_url.startswith(BASE+'/talentsearch/'):
             raise ValueError('Chrome is not on SEEK Talent Search. Complete sign-in first.')
         self.close_intro()
 
     def page_snapshot(self):
+        self.ensure_claim()
         from selenium.common.exceptions import StaleElementReferenceException
         try:
             self.close_intro()
@@ -144,6 +155,7 @@ class SeekBrowser:
         # multiple polls so a partially loaded tab is not captured immediately.
         stable = {'content': None, 'since': 0.0}
         def ready(_):
+            self.ensure_claim()
             from selenium.common.exceptions import StaleElementReferenceException
             try:
                 if numeric_id is not None:

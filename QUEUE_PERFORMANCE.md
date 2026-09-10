@@ -12,8 +12,10 @@ raise database timeouts to hide it.
 
 ## Install and measure
 
-Replace **repository.py and compare.py together**. Keep the latest review schema,
-config, reports and pending review records. No DDL or index migration is run.
+For the current shared-claim release, replace all application modules and SQL
+from this package. Run init-db once to add the missing operational claims table.
+Keep actual configs, reports and pending reviews; candidate tables/indexes are
+not altered. See MULTI_MACHINE.md.
 
 ```powershell
 python compare.py --config config.remote.json check-queue --limit 5 --explain
@@ -118,8 +120,15 @@ No server cursor or transaction remains open during browser work or breaks.
 
 Candidate UUIDs remain untouched. Every submission is pending human review.
 
-Validation: 104 tests passed. Link-specific checks cover mismatched legacy IDs,
+Validation: 127 tests passed. Link-specific checks cover mismatched legacy IDs,
 orphan/null-link pages, CSV dates and linked undated people. Added bounded early-stop, cross-page/date duplicate,
 reviewed/non-detail exclusion, CSV restriction, iterator resume and direct-ID
 bypass checks. SQL execution used SQLite adapters; real MariaDB 10.1 query plans,
 four-minute production behavior and server load were not reproduced here.
+
+
+With --submit, queue membership also excludes unexpired claims/retry delays using
+the claim table primary key. Acquisition rechecks ownership atomically, so stale
+queue pages cannot grant duplicate ownership. Contended IDs do not consume the
+worker's --limit. Plain check-queue/preview remains unreserved; use check-queue
+--available-only to include this extra read-only exclusion after init-db.

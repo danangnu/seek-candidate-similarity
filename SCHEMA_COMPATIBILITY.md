@@ -25,11 +25,10 @@ directly and bypasses the queue.
 The paged queue keeps each linked person's latest dated snapshot and removes
 duplicates. The alternate `target_table: "seek_scrap"` retains the legacy ID path.
 
-Replace `repository.py` and `compare.py` together for paged queue loading; keep
-the current `review_schema.sql` from this package. Keep all other
-files from the current review-only release, including the preceding sorting fix
-in `compare.py`. Alternatively replace all application files; keep your actual
-configurations and reports. No change to config keys or candidate tables is needed.
+For the multiple-machine update, replace all application modules and the bundled
+review_schema.sql, including the new work_claims.py. Keep actual configurations
+and reports. Run init-db once to add seek_uuid_work_claim; no ALTER or candidate
+migration is performed. See MULTI_MACHINE.md for privileges and deployment.
 
 Check with:
 
@@ -37,7 +36,8 @@ Check with:
 python compare.py --config config.remote.json check-connections
 ```
 
-If review tables have not been created, run `init-db` once, then repeat the check.
+Run `init-db` once after this update, then repeat the check. It creates missing
+review/work-claim tables and preserves existing tables and decisions.
 On MariaDB 10.1 this creates LONGTEXT JSON columns with primary/unique/foreign keys
 and skips newer JSON/CHECK clauses. On MariaDB 10.2.6+ the optional checks are
 included. Existing review tables and decisions are not altered or reset.
@@ -50,7 +50,11 @@ The collector continues to submit pending proposals only into
 seek_uuid_match_review and seek_uuid_match_review_history. It never updates the
 candidate UUID, performs approvals, or imports old mappings.
 
-Validation: 104 tests passed, including source queries against fixtures matching
+Validation: 127 tests passed, including source queries against fixtures matching
 the new columns, ordering, candidate-value preservation, strict JSON, and both
 legacy/modern DDL branches translated into SQLite. No actual MariaDB 10.1 DDL,
 remote service connection, live SEEK session or review app was tested here.
+
+Work claims use ordinary InnoDB rows and database UTC time, with no SKIP LOCKED,
+CTEs, JSON functions or UPDATE JOIN LIMIT. MariaDB 10.1 live validation remains
+a deployment check; automated SQL tests use a SQLite adapter.

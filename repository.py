@@ -19,7 +19,7 @@ def target_fields(table):
     uuid_column = t['uuid'] or 'NULL'  # seek_scrap has an integer link, not a UUID column.
     return f"{t['pk']} AS id_pk, {t['numeric']} AS id, {uuid_column} AS uuid, {metadata}"
 
-from review_schema import REVIEW_COLUMNS, HISTORY_COLUMNS, schema_statements
+from review_schema import REVIEW_COLUMNS, HISTORY_COLUMNS, CLAIM_COLUMNS, schema_statements
 from profiles import compare_evidence, normalized_profile_content
 
 COMPARISON_VERSION = 'profile_content_v2_review_v1'
@@ -66,6 +66,7 @@ class Repository:
     def __init__(self, config, password):
         import pymysql
         options = database_options(config, password)
+        self._connection_options = options
         self.require_tls = 'ssl' in options
         self.database = config['database']
         self.target_table = config.get('target_table', 'seek_scrap_detail')
@@ -114,7 +115,7 @@ class Repository:
         target = target_table or self.target_table
         if target not in TARGETS:
             raise ValueError('Unknown source table')
-        allowed = set(TARGETS) | {'seek_uuid_match_review', 'seek_uuid_match_review_history'}
+        allowed = set(TARGETS) | {'seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'}
         if any(table not in allowed for table in tables):
             raise ValueError('Unknown review/source table')
         with self.connection.cursor() as cur:
@@ -124,8 +125,10 @@ class Repository:
                 row = cur.fetchone()
                 if not row or not row['ENGINE'] or row['ENGINE'].lower() != 'innodb':
                     raise ValueError(table+' must exist and use InnoDB. Run init-db for missing review tables.')
-                if table in ('seek_uuid_match_review', 'seek_uuid_match_review_history'):
-                    columns = REVIEW_COLUMNS if table == 'seek_uuid_match_review' else HISTORY_COLUMNS
+                if table in ('seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'):
+                    columns = {'seek_uuid_match_review': REVIEW_COLUMNS,
+                               'seek_uuid_match_review_history': HISTORY_COLUMNS,
+                               'seek_uuid_work_claim': CLAIM_COLUMNS}[table]
                     cur.execute('SELECT '+', '.join(columns)+' FROM '+table+' LIMIT 0')
             cur.execute('SELECT '+target_fields(target)+' FROM '+target+' LIMIT 0')
             if 'seek_scrap' in tables:
@@ -136,7 +139,7 @@ class Repository:
         with self.connection.cursor() as cur:
             for statement in schema_statements():
                 cur.execute(statement)
-        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'])
 
     QUEUE_PAGE_SIZE = 500
 
@@ -148,7 +151,7 @@ class Repository:
             cur.execute(sql, params)
             return cur.fetchall()
 
-    def _queue_eligible(self, ids):
+    def _queue_eligible(self, ids, exclude_claimed=False):
         if not ids:
             return set()
         t = TARGETS[self.target_table]
@@ -159,8 +162,15 @@ class Repository:
             f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
             f"WHERE s.{t['numeric']} IN ({placeholders}){linked} AND NOT EXISTS "
             "(SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
-            f"AND r.seekid_detail=s.{t['numeric']})", tuple(ids) + (self.target_table,))
+            f"AND r.seekid_detail=s.{t['numeric']})"+self._claim_filter(exclude_claimed, t), tuple(ids) + (self.target_table,))
         return {row['id'] for row in rows}
+
+    def _claim_filter(self, enabled, target):
+        if not enabled:
+            return ''
+        return (" AND NOT EXISTS (SELECT 1 FROM seek_uuid_work_claim wc WHERE "
+                "wc.source_table='"+self.target_table+"' AND wc.seekid_detail=s."+target['numeric']+
+                " AND wc.expires_at > UTC_TIMESTAMP())")
 
     def _queue_latest_date(self, before=None):
         predicate = 'date_updated IS NOT NULL' if before is None else 'date_updated < %s'
@@ -187,7 +197,7 @@ class Repository:
         params = (profile_date,) if before_pk is None else (profile_date, before_pk)
         return self._queue_read(self._queue_history_sql(before_pk), params + (self.QUEUE_PAGE_SIZE,))
 
-    def _queue_undated_page(self, after_id=0):
+    def _queue_undated_page(self, after_id=0, exclude_claimed=False):
         t = TARGETS[self.target_table]
         relation = ('h.seek_scrap_id=s.id_detail' if self.target_table == 'seek_scrap_detail'
                     else f"h.id=s.{t['numeric']}")
@@ -199,15 +209,16 @@ class Repository:
             f"WHERE s.{t['numeric']} > %s{linked} AND NOT EXISTS (SELECT 1 FROM seek_scrap h "
             f"WHERE {relation} AND h.date_updated IS NOT NULL) "
             "AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
-            f"AND r.seekid_detail=s.{t['numeric']}) ORDER BY s.{t['numeric']} ASC LIMIT %s",
+            f"AND r.seekid_detail=s.{t['numeric']})"+self._claim_filter(exclude_claimed, t)+
+            f" ORDER BY s.{t['numeric']} ASC LIMIT %s",
             (after_id, self.target_table, self.QUEUE_PAGE_SIZE))
 
-    def _queue_csv_ranked(self, candidate_ids):
+    def _queue_csv_ranked(self, candidate_ids, exclude_claimed=False):
         # For an explicit CSV, aggregate only selected numeric IDs via the source/link indexes.
         dates = {}
         for offset in range(0, len(candidate_ids), self.QUEUE_PAGE_SIZE):
             chunk = candidate_ids[offset:offset+self.QUEUE_PAGE_SIZE]
-            eligible = self._queue_eligible(chunk)
+            eligible = self._queue_eligible(chunk, exclude_claimed)
             if not eligible:
                 continue
             placeholders = ','.join(['%s'] * len(eligible))
@@ -226,16 +237,17 @@ class Repository:
         ordered.sort(key=lambda numeric_id: str(dates[numeric_id] or ''), reverse=True)
         return ordered
 
-    def iter_ids(self, limit=None, candidate_ids=None):
+    def iter_ids(self, limit=None, candidate_ids=None, exclude_claimed=False):
         """Lazily yield newest-profile people; no whole-table GROUP BY/derived sort."""
         if limit is not None and (type(limit) is not int or limit < 1):
             raise ValueError('Queue limit must be a positive integer')
-        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_scrap'])
+        self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_scrap'] +
+                       (['seek_uuid_work_claim'] if exclude_claimed else []))
         if candidate_ids is not None:
             selected = sorted(set(candidate_ids))
             if any(type(n) is not int or n < 1 for n in selected):
                 raise ValueError('CSV numeric IDs must be positive integers')
-            for index, numeric_id in enumerate(self._queue_csv_ranked(selected)):
+            for index, numeric_id in enumerate(self._queue_csv_ranked(selected, exclude_claimed)):
                 if limit is not None and index >= limit:
                     break
                 yield numeric_id
@@ -258,7 +270,7 @@ class Repository:
                     if numeric_id is not None and numeric_id > 0 and numeric_id not in seen:
                         seen.add(numeric_id)
                         fresh.append(numeric_id)
-                eligible = self._queue_eligible(fresh)
+                eligible = self._queue_eligible(fresh, exclude_claimed)
                 for numeric_id in fresh:
                     if numeric_id in eligible:
                         emitted += 1
@@ -272,7 +284,7 @@ class Repository:
             profile_date = self._queue_latest_date(before=profile_date)
         after_id = 0
         while True:
-            page = self._queue_undated_page(after_id)
+            page = self._queue_undated_page(after_id, exclude_claimed)
             if not page:
                 return
             after_id = page[-1]['id']
@@ -332,7 +344,7 @@ class Repository:
             with c.cursor() as cur:
                 cur.execute('SELECT RELEASE_LOCK(%s)', (lock,))
 
-    def submit_proposal(self, numeric_id, uid, expected_fingerprint, evidence, created_by, assigned_reviewer=None):
+    def submit_proposal(self, numeric_id, uid, expected_fingerprint, evidence, created_by, assigned_reviewer=None, *, claim_token=None):
         """Insert a pending proposal and submitted audit event; NEVER mutate candidates."""
         if type(numeric_id) is not int or numeric_id <= 0:
             raise ValueError('Numeric SEEK ID must be a positive integer')
@@ -359,6 +371,8 @@ class Repository:
         self.verify_connection()
         self.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history'])
         with self.transaction() as cur:
+            if claim_token is not None:
+                self._assert_claim(cur, numeric_id, claim_token)
             cur.execute('SELECT review_id, status, assigned_reviewer FROM seek_uuid_match_review WHERE submission_hash=%s FOR UPDATE', (digest,))
             existing = cur.fetchone()
             if existing:
@@ -393,6 +407,106 @@ class Repository:
                          encode({'from_status': None, 'to_status': 'pending', 'assigned_reviewer': assigned_reviewer,
                                  'row_version': 1, 'submission_hash': digest})))
         return {'review_id': review_id, 'status': 'pending', 'created': True, 'assigned_reviewer': assigned_reviewer}
+
+    def claim_connection(self):
+        # Dedicated heartbeat connection: never share the browser thread's PyMySQL connection.
+        import pymysql
+        other = Repository.__new__(Repository)
+        other.database = self.database
+        other.target_table = self.target_table
+        other.require_tls = self.require_tls
+        other._connection_options = dict(self._connection_options)
+        # Bound heartbeat IO independently of long foreground query timeouts.
+        for name in ('connect_timeout', 'read_timeout', 'write_timeout'):
+            other._connection_options[name] = min(other._connection_options[name], 10)
+        other.connection = pymysql.connect(**other._connection_options, cursorclass=pymysql.cursors.DictCursor)
+        try:
+            other.verify_connection()
+        except BaseException:
+            other.close()
+            raise
+        return other
+
+    def claim_candidate(self, numeric_id, worker_id, created_by, lease_seconds, allow_rejected=False):
+        from uuid import uuid4
+        from work_claims import validate_duration
+        validate_duration(lease_seconds, 'claims.lease_seconds', 120, 86400)
+        if type(numeric_id) is not int or numeric_id <= 0:
+            raise ValueError('Claim numeric ID must be positive')
+        created_by = staff_id(created_by, 'created_by')
+        if not isinstance(worker_id, str) or not worker_id.strip() or len(worker_id) > 160:
+            raise ValueError('Claim worker ID must contain 1 to 160 characters')
+        self.connection.ping(reconnect=True)
+        self.verify_connection()
+        token = uuid4().hex
+        with self.transaction() as cur:
+            review_filter = " AND status IN ('pending','approved','applied')" if allow_rejected else ''
+            cur.execute('SELECT review_id FROM seek_uuid_match_review WHERE source_table=%s '
+                        'AND seekid_detail=%s'+review_filter+' LIMIT 1 FOR UPDATE', (self.target_table, numeric_id))
+            if cur.fetchone():
+                return None
+            cur.execute('SELECT claim_token, expires_at > UTC_TIMESTAMP() AS live FROM seek_uuid_work_claim '
+                        'WHERE source_table=%s AND seekid_detail=%s FOR UPDATE', (self.target_table, numeric_id))
+            existing = cur.fetchone()
+            if existing and existing['live']:
+                return None
+            if existing:
+                cur.execute("UPDATE seek_uuid_work_claim SET claim_token=%s, worker_id=%s, claimed_by=%s, "
+                            "state='active', claimed_at=UTC_TIMESTAMP(), heartbeat_at=UTC_TIMESTAMP(), "
+                            "expires_at=TIMESTAMPADD(SECOND,%s,UTC_TIMESTAMP()), last_result=NULL "
+                            "WHERE source_table=%s AND seekid_detail=%s",
+                            (token, worker_id, created_by, lease_seconds, self.target_table, numeric_id))
+            else:
+                cur.execute('INSERT INTO seek_uuid_work_claim '
+                            '(source_table,seekid_detail,claim_token,worker_id,claimed_by,state,claimed_at,heartbeat_at,expires_at) '
+                            "VALUES (%s,%s,%s,%s,%s,'active',UTC_TIMESTAMP(),UTC_TIMESTAMP(),TIMESTAMPADD(SECOND,%s,UTC_TIMESTAMP()))",
+                            (self.target_table, numeric_id, token, worker_id, created_by, lease_seconds))
+        return token
+
+    def _assert_claim(self, cur, numeric_id, token):
+        from work_claims import ClaimLost
+        cur.execute("SELECT claim_token FROM seek_uuid_work_claim WHERE source_table=%s AND seekid_detail=%s "
+                    "AND claim_token=%s AND state='active' AND expires_at > UTC_TIMESTAMP() FOR UPDATE",
+                    (self.target_table, numeric_id, token))
+        if not cur.fetchone():
+            raise ClaimLost('Candidate claim expired or changed owner; no proposal was submitted.')
+
+    def renew_claim(self, numeric_id, token, lease_seconds):
+        self.connection.ping(reconnect=True)
+        self.verify_connection()
+        with self.connection.cursor() as cur:
+            cur.execute('UPDATE seek_uuid_work_claim SET heartbeat_at=UTC_TIMESTAMP(), '
+                        'expires_at=TIMESTAMPADD(SECOND,%s,UTC_TIMESTAMP()) '
+                        "WHERE source_table=%s AND seekid_detail=%s AND claim_token=%s AND state='active' "
+                        'AND expires_at > UTC_TIMESTAMP()', (lease_seconds, self.target_table, numeric_id, token))
+            # A same-second renewal can have rowcount=0 even though ownership is valid.
+            if cur.rowcount == 0:
+                self._assert_claim(cur, numeric_id, token)
+
+    def finish_claim(self, numeric_id, token, retry_seconds, outcome):
+        self.connection.ping(reconnect=True)
+        self.verify_connection()
+        with self.connection.cursor() as cur:
+            cur.execute("UPDATE seek_uuid_work_claim SET state='finished', last_result=%s, "
+                        'expires_at=TIMESTAMPADD(SECOND,%s,UTC_TIMESTAMP()) '
+                        "WHERE source_table=%s AND seekid_detail=%s AND claim_token=%s AND state='active' "
+                        'AND expires_at > UTC_TIMESTAMP()',
+                        (outcome[:64], retry_seconds, self.target_table, numeric_id, token))
+
+    def start_claim_lease(self, numeric_id, worker_id, created_by, settings, allow_rejected=False):
+        from work_claims import ClaimLease
+        import time
+        started = time.monotonic()
+        token = self.claim_candidate(numeric_id, worker_id, created_by, settings['lease_seconds'], allow_rejected)
+        if token is None:
+            return None
+        # Expiry recovers a claim even if opening the heartbeat connection fails.
+        heartbeat_repo = self.claim_connection()
+        try:
+            return ClaimLease(heartbeat_repo, numeric_id, token, settings, started)
+        except BaseException:
+            heartbeat_repo.close()
+            raise
 
     def close(self):
         self.connection.close()
