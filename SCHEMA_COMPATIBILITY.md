@@ -6,8 +6,8 @@ Their header identifies MariaDB 10.1.48; no live server was queried.
 | Purpose | Current column/type | Collector behavior |
 | --- | --- | --- |
 | Historical row key | seek_scrap.id_pk INT | Read only |
-| Numeric SEEK ID | seek_scrap.id INT | Join/group by person |
-| Main table integer link | seek_scrap.seek_scrap_id INT | Preserve as source_link evidence; never treat as UUID |
+| Legacy numeric ID | seek_scrap.id INT | Used only by alternate seek_scrap source mode |
+| History-to-detail link | seek_scrap.seek_scrap_id INT | Join to seek_scrap_detail.id_detail; never treat as UUID |
 | Profile update date | seek_scrap.date_updated DATE | Newest dated history first, undated last |
 | Detail row key | seek_scrap_detail.id_detail INT | Read only |
 | Numeric SEEK ID in detail | seek_scrap_detail.seekid_detail INT, unique | Source ID and future approved-update key |
@@ -16,8 +16,14 @@ Their header identifies MariaDB 10.1.48; no live server was queried.
 The two old assumptions are removed: `seek_scrap.uuid` and
 `seek_scrap_detail.seek_scrap_id` no longer exist in the supplied structures.
 The default source remains `seek_scrap_detail`. Joining to update-date history
-still uses `seek_scrap.id = seek_scrap_detail.seekid_detail`, not the main table's
-integer `seek_scrap_id`. The paged queue keeps the first dated snapshot for each person and removes duplicates.
+uses the user-confirmed `seek_scrap.seek_scrap_id = seek_scrap_detail.id_detail`.
+The numeric ID comes from `seek_scrap_detail.seekid_detail`; `seek_scrap.id` is
+ignored in this mode, even when it contains a different numeric ID. This applies
+to dated pages, CSV selection and the undated fallback. Unlinked detail rows are
+excluded from the normal queue. Explicit `--id` still selects a detail person
+directly and bypasses the queue.
+The paged queue keeps each linked person's latest dated snapshot and removes
+duplicates. The alternate `target_table: "seek_scrap"` retains the legacy ID path.
 
 Replace `repository.py` and `compare.py` together for paged queue loading; keep
 the current `review_schema.sql` from this package. Keep all other
@@ -44,7 +50,7 @@ The collector continues to submit pending proposals only into
 seek_uuid_match_review and seek_uuid_match_review_history. It never updates the
 candidate UUID, performs approvals, or imports old mappings.
 
-Validation: 100 tests passed, including source queries against fixtures matching
+Validation: 104 tests passed, including source queries against fixtures matching
 the new columns, ordering, candidate-value preservation, strict JSON, and both
 legacy/modern DDL branches translated into SQLite. No actual MariaDB 10.1 DDL,
 remote service connection, live SEEK session or review app was tested here.

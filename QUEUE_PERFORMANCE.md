@@ -52,40 +52,52 @@ LIMIT 1;
 2. Read a bounded page within that date, newest historical primary key first:
 
 ```sql
-SELECT id_pk, id, date_updated
-FROM seek_scrap FORCE INDEX (date_updated)
-WHERE date_updated = %s
-ORDER BY id_pk DESC
-LIMIT 500;
+SELECT p.id_pk, d.seekid_detail AS id, p.date_updated
+FROM (
+    SELECT id_pk, seek_scrap_id, date_updated
+    FROM seek_scrap FORCE INDEX (date_updated)
+    WHERE date_updated = %s
+    ORDER BY id_pk DESC
+    LIMIT 500
+) p
+LEFT JOIN seek_scrap_detail d ON d.id_detail = p.seek_scrap_id
+ORDER BY p.id_pk DESC;
 ```
 
 On the next page, add `AND id_pk < %s`. After finishing the date, the next-date
 lookup uses `date_updated < %s`. Placeholders above are bound by Python.
+
+This implements the confirmed `seek_scrap.seek_scrap_id = seek_scrap_detail.id_detail`
+relationship. The inner page is bounded to 500 history rows before joining. The
+internal LEFT JOIN retains orphaned rows only to advance the pagination cursor;
+NULL numeric IDs are discarded. Returned people therefore require a matching
+detail row, as in the requested INNER JOIN. A page consisting entirely of missing
+links cannot prematurely stop the scan. No full-history derived aggregation is used.
 
 3. Deduplicate numeric people in Python, and check source membership/past
 proposals using an IN list of at most 500 IDs. Close each cursor before yielding
 IDs to the browser. The first occurrence gives each person's latest date.
 4. Stop as soon as the requested number of people has been yielded. Full runs
 consume the same iterator progressively, rather than preloading one million IDs.
-5. Only after exhausting dated history, retrieve undated/no-history people from
-the source in ascending numeric-ID pages. They remain behind dated profiles.
+5. Only after exhausting dated history, retrieve people with linked history but no
+profile date in ascending numeric-ID pages. Unlinked detail people are excluded. They remain behind dated profiles.
 
 This follows the cursor-based pagination approach described in
 [MariaDB pagination optimization](https://mariadb.com/docs/server/ha-and-performance/optimization-and-tuning/query-optimizations/pagination-optimization).
 
 For explicit CSV files, the collector filters IDs first, then gets MAX(date_updated)
 for ONLY selected eligible IDs in batches. That restricted aggregation uses the
-existing seek_scrap.id index. It must rank the selected CSV set before yielding
+detail seekid_detail index and the history seek_scrap_id link index. It must rank the selected CSV set before yielding
 results; a very large CSV is still more work than a small one.
 
 ## Existing indexes and limits
 
-The supplied schemas already show date_updated and id indexes on seek_scrap,
-idx_seekid on seek_scrap_detail.seekid_detail, and the review DDL defines an index
-starting with (source_table, seekid_detail). The query names the supplied history
-indexes explicitly; if your installed names differ, reconcile them before running.
+The supplied schemas already show date_updated and seek_scrap_id indexes on
+seek_scrap, the id_detail primary key and idx_seekid on seek_scrap_detail.seekid_detail, and the review DDL defines an index
+starting with (source_table, seekid_detail). The date queries name the date_updated index explicitly; if your installed names differ, reconcile them before running.
 
-Check EXPLAIN for a usable date_updated key. If the within-date query shows a
+Check EXPLAIN for a usable date_updated key and a primary-key detail lookup.
+Remeasure after this join update; earlier timings do not validate the new plan. If the within-date query shows a
 large filesort or poor estimates, investigate the actual plan and index definitions;
 do not assume that FORCE INDEX guarantees an efficient plan. This release does
 not create indexes on the live table. A DBA can assess a composite
@@ -106,7 +118,8 @@ No server cursor or transaction remains open during browser work or breaks.
 
 Candidate UUIDs remain untouched. Every submission is pending human review.
 
-Validation: 100 tests passed. Added bounded early-stop, cross-page/date duplicate,
+Validation: 104 tests passed. Link-specific checks cover mismatched legacy IDs,
+orphan/null-link pages, CSV dates and linked undated people. Added bounded early-stop, cross-page/date duplicate,
 reviewed/non-detail exclusion, CSV restriction, iterator resume and direct-ID
 bypass checks. SQL execution used SQLite adapters; real MariaDB 10.1 query plans,
 four-minute production behavior and server load were not reproduced here.

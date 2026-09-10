@@ -136,11 +136,21 @@ Queue order is newest updated person first. Normal collection walks the existing
 `seek_scrap.date_updated` index one date at a time, newest first, and reads at most
 500 history rows per page. It uses an `id_pk` cursor inside a date, so no OFFSET
 or full-history GROUP BY is needed. The first occurrence of each numeric person
-is their latest dated snapshot. Small membership queries match `seek_scrap.id`
-to `seek_scrap_detail.seekid_detail` and exclude existing proposals.
+is their latest dated snapshot. With `target_table: "seek_scrap_detail"`, the
+confirmed relationship is:
 
-For same-day profiles, history `id_pk` descending breaks ties. People with no
-dated history appear last in numeric-ID order. CSV selection uses indexed,
+```sql
+SELECT d.seekid_detail AS numeric_seek_id, s.date_updated
+FROM seek_scrap s
+JOIN seek_scrap_detail d ON d.id_detail = s.seek_scrap_id;
+```
+
+The queue reads the numeric ID from `d.seekid_detail`, deduplicates linked people,
+and excludes existing proposals. `seek_scrap.id` is not used to identify people
+in this mode. The alternate `target_table: "seek_scrap"` retains its legacy ID path.
+
+For same-day profiles, history `id_pk` descending breaks ties. People with linked history but no
+profile date appear last in numeric-ID order. Unlinked detail rows are excluded. CSV selection uses indexed,
 restricted groups of at most 500 selected IDs and keeps numeric-ID ties within
 equal dates. Neither mode sorts by scrape time. The uploaded profile date is a
 DATE column, so actual within-day update times are unavailable.
@@ -211,7 +221,7 @@ See [REVIEW_APP_CONTRACT.md](REVIEW_APP_CONTRACT.md) for their database contract
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 100 tests,
+Run `python -m unittest discover -s tests -v`. This release passed 104 tests,
 including matching, browser-flow fakes, remote-service fixtures, idle timing,
 proposal/history transaction rollback, reviewer assignment and no candidate writes.
 SQLite adapters exercise the schema and repository SQL with MySQL-specific DDL

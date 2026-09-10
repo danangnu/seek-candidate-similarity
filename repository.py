@@ -129,7 +129,7 @@ class Repository:
                     cur.execute('SELECT '+', '.join(columns)+' FROM '+table+' LIMIT 0')
             cur.execute('SELECT '+target_fields(target)+' FROM '+target+' LIMIT 0')
             if 'seek_scrap' in tables:
-                cur.execute('SELECT id, date_updated FROM seek_scrap LIMIT 0')
+                cur.execute('SELECT id, seek_scrap_id, date_updated FROM seek_scrap LIMIT 0')
 
     def initialize(self):
         self.preflight([self.target_table])
@@ -153,9 +153,11 @@ class Repository:
             return set()
         t = TARGETS[self.target_table]
         placeholders = ','.join(['%s'] * len(ids))
+        linked = (' AND EXISTS (SELECT 1 FROM seek_scrap h WHERE h.seek_scrap_id=s.id_detail)'
+                  if self.target_table == 'seek_scrap_detail' else '')
         rows = self._queue_read(
             f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
-            f"WHERE s.{t['numeric']} IN ({placeholders}) AND NOT EXISTS "
+            f"WHERE s.{t['numeric']} IN ({placeholders}){linked} AND NOT EXISTS "
             "(SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
             f"AND r.seekid_detail=s.{t['numeric']})", tuple(ids) + (self.target_table,))
         return {row['id'] for row in rows}
@@ -167,27 +169,41 @@ class Repository:
             ' ORDER BY date_updated DESC LIMIT 1', () if before is None else (before,))
         return rows[0]['date_updated'] if rows else None
 
-    def _queue_history_page(self, profile_date, before_pk=None):
+    def _queue_history_sql(self, before_pk=None):
         cursor_filter = '' if before_pk is None else ' AND id_pk < %s'
+        if self.target_table == 'seek_scrap_detail':
+            # Limit raw history FIRST so a page of orphaned links cannot end the
+            # scan early. LEFT JOIN keeps its cursor rows; NULL IDs are never yielded.
+            return ('SELECT p.id_pk, d.seekid_detail AS id, p.date_updated '
+                    'FROM (SELECT id_pk, seek_scrap_id, date_updated '
+                    'FROM seek_scrap FORCE INDEX (date_updated) '
+                    'WHERE date_updated=%s'+cursor_filter+' ORDER BY id_pk DESC LIMIT %s) p '
+                    'LEFT JOIN seek_scrap_detail d ON d.id_detail=p.seek_scrap_id '
+                    'ORDER BY p.id_pk DESC')
+        return ('SELECT id_pk, id, date_updated FROM seek_scrap FORCE INDEX (date_updated) '
+                'WHERE date_updated=%s'+cursor_filter+' ORDER BY id_pk DESC LIMIT %s')
+
+    def _queue_history_page(self, profile_date, before_pk=None):
         params = (profile_date,) if before_pk is None else (profile_date, before_pk)
-        return self._queue_read(
-            'SELECT id_pk, id, date_updated FROM seek_scrap FORCE INDEX (date_updated) '
-            'WHERE date_updated=%s'+cursor_filter+' ORDER BY id_pk DESC LIMIT %s',
-            params + (self.QUEUE_PAGE_SIZE,))
+        return self._queue_read(self._queue_history_sql(before_pk), params + (self.QUEUE_PAGE_SIZE,))
 
     def _queue_undated_page(self, after_id=0):
         t = TARGETS[self.target_table]
-        # Reach this only after all dated history. Includes source IDs with no history.
+        relation = ('h.seek_scrap_id=s.id_detail' if self.target_table == 'seek_scrap_detail'
+                    else f"h.id=s.{t['numeric']}")
+        linked = (' AND EXISTS (SELECT 1 FROM seek_scrap h WHERE '+relation+')'
+                  if self.target_table == 'seek_scrap_detail' else '')
+        # Undated people must have linked history, matching the requested INNER JOIN.
         return self._queue_read(
             f"SELECT DISTINCT s.{t['numeric']} AS id FROM {self.target_table} s "
-            f"WHERE s.{t['numeric']} > %s AND NOT EXISTS (SELECT 1 FROM seek_scrap h "
-            f"WHERE h.id=s.{t['numeric']} AND h.date_updated IS NOT NULL) "
+            f"WHERE s.{t['numeric']} > %s{linked} AND NOT EXISTS (SELECT 1 FROM seek_scrap h "
+            f"WHERE {relation} AND h.date_updated IS NOT NULL) "
             "AND NOT EXISTS (SELECT 1 FROM seek_uuid_match_review r WHERE r.source_table=%s "
             f"AND r.seekid_detail=s.{t['numeric']}) ORDER BY s.{t['numeric']} ASC LIMIT %s",
             (after_id, self.target_table, self.QUEUE_PAGE_SIZE))
 
     def _queue_csv_ranked(self, candidate_ids):
-        # For an explicit CSV, aggregate only the selected numeric IDs via the id index.
+        # For an explicit CSV, aggregate only selected numeric IDs via the source/link indexes.
         dates = {}
         for offset in range(0, len(candidate_ids), self.QUEUE_PAGE_SIZE):
             chunk = candidate_ids[offset:offset+self.QUEUE_PAGE_SIZE]
@@ -195,10 +211,14 @@ class Repository:
             if not eligible:
                 continue
             placeholders = ','.join(['%s'] * len(eligible))
-            rows = self._queue_read(
-                'SELECT id, MAX(date_updated) AS latest_profile_updated '
-                'FROM seek_scrap FORCE INDEX (id) WHERE id IN ('+placeholders+') GROUP BY id',
-                tuple(sorted(eligible)))
+            if self.target_table == 'seek_scrap_detail':
+                sql = ('SELECT d.seekid_detail AS id, MAX(h.date_updated) AS latest_profile_updated '
+                       'FROM seek_scrap_detail d JOIN seek_scrap h ON h.seek_scrap_id=d.id_detail '
+                       'WHERE d.seekid_detail IN ('+placeholders+') GROUP BY d.seekid_detail')
+            else:
+                sql = ('SELECT id, MAX(date_updated) AS latest_profile_updated '
+                       'FROM seek_scrap FORCE INDEX (id) WHERE id IN ('+placeholders+') GROUP BY id')
+            rows = self._queue_read(sql, tuple(sorted(eligible)))
             latest = {row['id']: row['latest_profile_updated'] for row in rows}
             dates.update({numeric_id: latest.get(numeric_id) for numeric_id in eligible})
         # Stable numeric ties for the small explicitly selected CSV set.
@@ -278,8 +298,7 @@ class Repository:
         latest = self._queue_latest_date()
         if latest is not None:
             queries.append(('History page within latest date',
-                            'SELECT id_pk,id,date_updated FROM seek_scrap FORCE INDEX (date_updated) '
-                            'WHERE date_updated=%s ORDER BY id_pk DESC LIMIT %s', (latest,self.QUEUE_PAGE_SIZE)))
+                            self._queue_history_sql(), (latest,self.QUEUE_PAGE_SIZE)))
         for label, sql, params in queries:
             print(label+':')
             print(json.dumps(self._queue_read('EXPLAIN '+sql,params),default=str,indent=2))
@@ -354,7 +373,9 @@ class Repository:
                 raise ValueError('Source rows changed since comparison. Rerun this numeric ID.')
             evidence = dict(evidence, comparison=comparison, source_table=self.target_table,
                             source_rows=rows, source_fingerprint=expected_fingerprint,
-                            numeric_key=TARGETS[self.target_table]['numeric'])
+                            numeric_key=TARGETS[self.target_table]['numeric'],
+                            history_relationship=('seek_scrap.seek_scrap_id = seek_scrap_detail.id_detail'
+                                                  if self.target_table == 'seek_scrap_detail' else 'legacy seek_scrap.id'))
             cur.execute('INSERT INTO seek_uuid_match_review '
                         '(source_table,seekid_detail,proposed_uuid,numeric_profile_url,uuid_profile_url,'
                         'numeric_profile_snapshot,uuid_profile_snapshot,comparison_evidence,exact_content_match,'

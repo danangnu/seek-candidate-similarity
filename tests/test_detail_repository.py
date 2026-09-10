@@ -74,7 +74,7 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.db.executescript('''
         CREATE TABLE seek_scrap (id_pk INTEGER PRIMARY KEY, id INTEGER, seek_scrap_id INTEGER, name TEXT, file TEXT, scrap_date TEXT, date_updated TEXT);
         CREATE TABLE seek_scrap_detail (id_detail INTEGER PRIMARY KEY, seekid_detail INTEGER UNIQUE, uuid TEXT, match_path_found TEXT);
-        INSERT INTO seek_scrap VALUES (1,42,98765,'Alex Example','',NULL,'2026-01-01');
+        INSERT INTO seek_scrap VALUES (1,42,100,'Alex Example','',NULL,'2026-01-01');
         INSERT INTO seek_scrap_detail VALUES (100,42,12345,'preserve matching metadata');
         ''')
         self.repo.initialize()
@@ -87,18 +87,18 @@ class ReviewRepositoryTest(unittest.TestCase):
     def test_detail_queue_latest_profile_date_first_deduplicated_nulls_last(self):
         self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,?,NULL)',
                             [(101,43,100),(102,44,101),(103,45,102),(104,46,103)])
-        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
-                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,44,'2026-09-09'),
-                             (5,45,None),(6,42,'2026-09-09')])
-        # 46 has no seek_scrap row; keep it after dated people. Ties use numeric ID.
-        self.assertEqual(self.repo.ids(),[43,42,44,45,46])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,43,101,'2026-09-10'),(3,43,101,'2020-01-01'),(4,44,102,'2026-09-09'),
+                             (5,45,103,None),(6,42,100,'2026-09-09')])
+        # Unlinked detail 46 is excluded; linked undated 45 follows dated people.
+        self.assertEqual(self.repo.ids(),[43,42,44,45])
         self.submit(numeric=43)
-        self.assertEqual(self.repo.ids(),[42,44,45,46])
+        self.assertEqual(self.repo.ids(),[42,44,45])
 
     def test_alternate_main_source_uses_latest_snapshot_date(self):
         self.repo.target_table='seek_scrap'
-        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
-                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,44,None)])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,43,101,'2026-09-10'),(3,43,101,'2020-01-01'),(4,44,102,None)])
         self.assertEqual(self.repo.ids(),[43,42,44])
 
     def test_pending_proposal_has_snapshots_assignment_and_no_approval(self):
@@ -112,7 +112,7 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.assertTrue(json.loads(row['comparison_evidence'])['comparison']['profile_content_equal'])
         self.assertEqual(row['row_version'],1)
         self.assertEqual(self.db.execute('SELECT uuid FROM seek_scrap_detail').fetchone()[0],'12345')
-        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],98765)
+        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],100)
         self.assertEqual(self.repo.ids(),[])
         event=dict(self.db.execute('SELECT * FROM seek_uuid_match_review_history').fetchone())
         self.assertEqual(event['action'],'submitted');self.assertEqual(event['performed_by'],'collector')
@@ -186,41 +186,71 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.assertNotIn('seek_candidate_identity_map',tables);self.assertNotIn('seek_uuid_backfill_audit',tables)
     def test_queue_limit_stops_before_older_dates_without_global_aggregation(self):
         self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
-        self.db.execute("INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (2,43,'2026-09-10')")
+        self.db.execute("INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (2,43,101,'2026-09-10')")
         self.repo.QUEUE_PAGE_SIZE=1
         self.repo.connection.statements.clear()
         self.assertEqual(self.repo.ids(limit=1),[43])
         queries=self.repo.connection.statements
         self.assertFalse(any('GROUP BY' in q or 'MAX(' in q or 'OFFSET' in q for q in queries))
-        self.assertEqual(sum(q.startswith('SELECT id_pk, id, date_updated') for q in queries),1)
+        self.assertEqual(sum(q.startswith('SELECT p.id_pk, d.seekid_detail AS id') for q in queries),1)
         self.assertFalse(any('date_updated <' in q for q in queries))
 
     def test_queue_deduplicates_across_pages_and_dates_with_same_date_ties(self):
         self.repo.QUEUE_PAGE_SIZE=1
         self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,NULL,NULL)',[(101,43),(102,44)])
-        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
-                            [(2,43,'2026-09-10'),(3,43,'2026-09-10'),(4,44,'2026-09-10'),(5,43,'2025-01-01')])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,43,101,'2026-09-10'),(3,43,101,'2026-09-10'),(4,44,102,'2026-09-10'),(5,43,101,'2025-01-01')])
         self.assertEqual(self.repo.ids(),[44,43,42])
         self.assertTrue(any('id_pk <' in q for q in self.repo.connection.statements))
 
     def test_queue_skips_reviewed_and_non_detail_people_before_applying_limit(self):
         self.submit()
         self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
-        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
-                            [(2,43,'2025-01-01'),(3,999,'2026-09-10')])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,43,101,'2025-01-01'),(3,999,99999,'2026-09-10')])
         self.repo.QUEUE_PAGE_SIZE=1
         self.assertEqual(self.repo.ids(limit=1),[43])
 
     def test_queue_csv_aggregates_only_selected_ids_and_keeps_missing_dates_last(self):
         self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,NULL,NULL)',[(101,43),(102,44)])
-        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (?,?,?)',
-                            [(2,43,'2026-09-10'),(3,43,'2020-01-01'),(4,999,'2026-09-11')])
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,43,101,'2026-09-10'),(3,43,101,'2020-01-01'),(4,999,99999,'2026-09-11'),(5,44,102,None)])
         self.repo.connection.statements.clear()
         self.assertEqual(self.repo.ids(limit=2,candidate_ids={42,43,44,999}),[43,42])
         queries=self.repo.connection.statements
         self.assertFalse(any('FORCE INDEX (date_updated)' in q for q in queries))
-        self.assertTrue(any('WHERE id IN (' in q and 'GROUP BY id' in q for q in queries))
+        self.assertTrue(any('WHERE d.seekid_detail IN (' in q and 'GROUP BY d.seekid_detail' in q for q in queries))
         self.assertEqual(self.repo.ids(candidate_ids={44}),[44])
+
+    def test_detail_queue_uses_link_not_legacy_numeric_id(self):
+        self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,999,NULL,NULL)')
+        self.db.execute('UPDATE seek_scrap SET id=999 WHERE id_pk=1')
+        # Legacy id points at an unrelated detail person; the link still means 42.
+        self.assertEqual(self.repo.ids(),[42])
+        self.assertEqual(self.repo.ids(candidate_ids={42,999}),[42])
+        self.submit(numeric=999)
+        self.assertEqual(self.repo.ids(),[42])
+        self.submit(numeric=42)
+        self.assertEqual(self.repo.ids(),[])
+
+    def test_orphan_and_null_link_pages_do_not_end_date_scan(self):
+        self.repo.QUEUE_PAGE_SIZE=1
+        self.db.executemany('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (?,?,?,?)',
+                            [(2,42,None,'2026-01-01'),(3,42,99999,'2026-01-01')])
+        self.assertEqual(self.repo.ids(limit=1),[42])
+
+    def test_csv_dates_follow_links_even_when_legacy_ids_are_swapped(self):
+        self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
+        self.db.execute('UPDATE seek_scrap SET id=43 WHERE id_pk=1')
+        self.db.execute("INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (2,42,101,'2026-09-10')")
+        self.assertEqual(self.repo.ids(),[43,42])
+        self.assertEqual(self.repo.ids(candidate_ids={42,43}),[43,42])
+
+    def test_linked_undated_included_unlinked_detail_excluded(self):
+        self.db.executemany('INSERT INTO seek_scrap_detail VALUES (?,?,NULL,NULL)',[(101,43),(102,44)])
+        self.db.execute('INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (2,999,101,NULL)')
+        self.assertEqual(self.repo.ids(),[42,43])
+        self.assertEqual(self.repo.ids(candidate_ids={42,43,44}),[42,43])
 
     def test_queue_empty_csv_and_invalid_limit(self):
         self.assertEqual(self.repo.ids(candidate_ids=[]),[])
@@ -230,7 +260,7 @@ class ReviewRepositoryTest(unittest.TestCase):
     def test_queue_generator_releases_cursor_before_submission_and_resumes(self):
         self.repo.QUEUE_PAGE_SIZE=1
         self.db.execute('INSERT INTO seek_scrap_detail VALUES (101,43,NULL,NULL)')
-        self.db.execute("INSERT INTO seek_scrap (id_pk,id,date_updated) VALUES (2,43,'2026-09-10')")
+        self.db.execute("INSERT INTO seek_scrap (id_pk,id,seek_scrap_id,date_updated) VALUES (2,43,101,'2026-09-10')")
         queue=self.repo.iter_ids(limit=2)
         self.assertEqual(next(queue),43)
         self.assertTrue(self.submit(numeric=43)['created'])
@@ -243,10 +273,10 @@ class ReviewRepositoryTest(unittest.TestCase):
         self.repo.target_table='seek_scrap'
         history = self.repo.rows(42)[0]
         self.assertIsNone(history['uuid'])
-        self.assertEqual(history['source_link'],98765)
+        self.assertEqual(history['source_link'],100)
         self.assertEqual(history['id'],42)
         self.assertTrue(self.submit()['created'])
-        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],98765)
+        self.assertEqual(self.db.execute('SELECT seek_scrap_id FROM seek_scrap').fetchone()[0],100)
 
     def test_legacy_review_ddl_has_no_json_functions_or_check_clauses(self):
         connection=sqlite3.connect(':memory:')
