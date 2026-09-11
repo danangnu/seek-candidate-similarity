@@ -38,6 +38,20 @@ test_path_mapping_preserves_id_subfolder (test_backfill.ProfilesTest.test_path_m
 test_scopes_roles_and_ignores_recommendations (test_backfill.ProfilesTest.test_scopes_roles_and_ignores_recommendations) ... ok
 test_transaction_rolls_back_on_failure (test_backfill.ProfilesTest.test_transaction_rolls_back_on_failure) ... ok
 test_url_validation_and_token_exclusion (test_backfill.ProfilesTest.test_url_validation_and_token_exclusion) ... ok
+test_browser_delay_crossing_end_never_navigates (test_daily_schedule.ScheduleTest.test_browser_delay_crossing_end_never_navigates) ... ok
+test_cached_schedule_stops_at_end_and_ctrl_c_works (test_daily_schedule.ScheduleTest.test_cached_schedule_stops_at_end_and_ctrl_c_works) ... ok
+test_claim_loss_during_closed_period_propagates (test_daily_schedule.ScheduleTest.test_claim_loss_during_closed_period_propagates) ... ok
+test_database_edits_applied_after_30_seconds (test_daily_schedule.ScheduleTest.test_database_edits_applied_after_30_seconds) ... ok
+test_invalid_values_fail_closed (test_daily_schedule.ScheduleTest.test_invalid_values_fail_closed) ... ok
+test_missing_blank_and_equal_days_closed (test_daily_schedule.ScheduleTest.test_missing_blank_and_equal_days_closed) ... ok
+test_multiple_windows_allow_lunch_gap (test_daily_schedule.ScheduleTest.test_multiple_windows_allow_lunch_gap) ... ok
+test_refresh_failure_stops_without_raw_database_details (test_daily_schedule.ScheduleTest.test_refresh_failure_stops_without_raw_database_details) ... ok
+test_repository_reads_only_selected_database_schedule (test_daily_schedule.ScheduleTest.test_repository_reads_only_selected_database_schedule) ... ok
+test_run_missing_schedule_stops_before_claim_or_browser (test_daily_schedule.ScheduleTest.test_run_missing_schedule_stops_before_claim_or_browser) ... ok
+test_run_schedule_error_during_profile_stops_and_releases_claim (test_daily_schedule.ScheduleTest.test_run_schedule_error_during_profile_stops_and_releases_claim) ... ok
+test_sunday_overnight_into_monday (test_daily_schedule.ScheduleTest.test_sunday_overnight_into_monday) ... ok
+test_uploaded_week_and_exact_boundaries (test_daily_schedule.ScheduleTest.test_uploaded_week_and_exact_boundaries) ... ok
+test_wait_before_open_uses_database_clock_and_checks_claim (test_daily_schedule.ScheduleTest.test_wait_before_open_uses_database_clock_and_checks_claim) ... ok
 test_active_numeric_proposal_prevents_different_proposal (test_detail_repository.ReviewRepositoryTest.test_active_numeric_proposal_prevents_different_proposal) ... ok
 test_alternate_main_source_uses_latest_snapshot_date (test_detail_repository.ReviewRepositoryTest.test_alternate_main_source_uses_latest_snapshot_date) ... ok
 test_csv_dates_follow_links_even_when_legacy_ids_are_swapped (test_detail_repository.ReviewRepositoryTest.test_csv_dates_follow_links_even_when_legacy_ids_are_swapped) ... ok
@@ -147,7 +161,7 @@ test_real_heartbeat_thread_uses_its_own_connection_and_closes (test_work_claims.
 test_slow_response_does_not_resurrect_local_lease (test_work_claims.LeaseTest.test_slow_response_does_not_resurrect_local_lease) ... ok
 
 ----------------------------------------------------------------------
-Ran 147 tests in 0.643s
+Ran 161 tests in 0.655s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -156,10 +170,5 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-Pagination correction: 147 tests passed.
-Fake-browser cases cover 38 results over 20+18 cards with no Next control,
-preserved WA query, repeated pages, changed counts and page limits.
-No authenticated SEEK session or live MariaDB was accessed. The user report
-confirms 20 of 38 cards read on page 1 with location_verified=true; it does not
-show whether the Next control was delayed, absent or had changed markup.
-No candidate writes, schema changes or new dependencies are involved.
+Daily schedule validation: fake clocks, mocked browser/database and existing SQLite tests.
+No live SEEK or MariaDB session. No candidate/table writes. See DAILY_SCHEDULE.md.

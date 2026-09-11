@@ -155,3 +155,7 @@ Name searches default to Western Australia WA, including existing configurations
 Set browser.search_location to null for an Australia-wide search. The collector
 resolves SEEK's location value via its visible autosuggest control; no guessed
 region ID is needed. See SEARCH_TROUBLESHOOTING.md for diagnostics.
+
+Daily schedule: the account also needs SELECT on seek_run_times. All workers
+use NOW() from the configured database session. See DAILY_SCHEDULE.md and check
+the server clock before deployment. No schedule rows are written by this app.

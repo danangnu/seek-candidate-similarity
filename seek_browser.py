@@ -213,6 +213,9 @@ class SeekBrowser:
         guard = getattr(self, 'claim_guard', None)
         if guard is not None:
             guard()
+        schedule = getattr(self, 'schedule_guard', None)
+        if schedule is not None:
+            schedule(guard)
 
     def pause(self, action):
         self.ensure_claim()

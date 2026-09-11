@@ -9,6 +9,7 @@ from uuid import uuid4
 from profiles import extract_candidate_profile, read_html, compare_evidence, compare_profiles_with_ollama, norm, canonical_uuid, automatic_match_decision
 from repository import Repository, fingerprint, review_actors
 from runtime_breaks import RuntimeBreaks, BreakSettingsError, validate_settings
+from daily_schedule import DailySchedule, ScheduleError
 from network_config import ollama_options, check_ollama
 from work_claims import ClaimLost, claim_settings, worker_identity
 
@@ -97,11 +98,13 @@ def run(args, config, repo):
     ids = chain([first_id], queue if args.apply else islice(queue, args.limit-1)) if first_id is not None else ()
     breaks = RuntimeBreaks(created_by, repo.scrap_idle_settings,
                            config.get('breaks', {}).get('settings_id', 1)) if first_id is not None else None
+    schedule = DailySchedule(repo.run_schedule) if first_id is not None else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
     attempted = 0
     try:
         for numeric_id in ids:
+            schedule.wait_until_open()  # Do not acquire a claim outside the schedule.
             lease = None
             if args.apply:
                 lease = repo.start_claim_lease(numeric_id, worker_id, created_by, settings, allow_rejected=bool(args.id))
@@ -120,9 +123,11 @@ def run(args, config, repo):
                 rows = repo.rows(numeric_id)
                 if not rows:
                     raise ValueError('Numeric ID is not present in the configured '+repo.target_table+'; check the selected database and candidate sample')
+                schedule.wait_until_open(lease.check if lease else None)
                 if browser is None:
                     browser = SeekBrowser(config.get('browser', {}))
                     browser.claim_guard = lease.check if lease else None
+                    browser.schedule_guard = schedule.wait_until_open
                     browser.login()
                     breaks.start()
                 browser.claim_guard = lease.check if lease else None
@@ -191,7 +196,7 @@ def run(args, config, repo):
                                 candidate['ollama_error'] = type(ex).__name__
                         print('  Compared', uid, '| rank', candidate['evidence']['rank'],
                               '| identical Profile content:', candidate['evidence']['profile_content_equal'])
-                    except ClaimLost:
+                    except (ClaimLost, ScheduleError):
                         raise
                     except Exception as ex:
                         # Selenium errors may embed token-bearing URLs: do not serialize them.
@@ -271,6 +276,10 @@ def run(args, config, repo):
                 report.update(status='stopped_claim_lost', reason=str(ex))
                 write_report(folder, numeric_id, report)
                 raise
+            except ScheduleError as ex:
+                report.update(status='stopped_schedule_error', reason=str(ex))
+                write_report(folder, numeric_id, report)
+                raise
             except BreakSettingsError as ex:
                 report.update(status='stopped_invalid_break_settings', reason=str(ex))
                 write_report(folder, numeric_id, report)
@@ -321,6 +330,7 @@ def check_connections(config, repo, no_ollama=False):
     checks = [
         ('Candidate source and profile dates (read-only)', lambda: repo.preflight([repo.target_table, 'seek_scrap'])),
         ('Review queue, history and work claims', lambda: repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'])),
+        ('Daily schedule (database server time)', lambda: DailySchedule(repo.run_schedule)),
         ('Runtime break settings', lambda: validate_settings(repo.scrap_idle_settings(config.get('breaks', {}).get('settings_id', 1))))]
     if not no_ollama:
         checks.append(('Ollama endpoint and model', lambda: check_ollama(**ollama_options(config.get('ollama', {})))))

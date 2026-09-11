@@ -113,7 +113,7 @@ query above. A person already reserved by worker A should be skipped by worker B
 Each worker should collect different available people. Review only the pending
 proposals; this collector still performs no approved candidate UUID updates.
 
-Automated validation covers 147 tests, including two SQLite connections racing
+Automated validation covers 161 tests, including two SQLite connections racing
 under an emulated advisory lock, stale-token rejection, actual heartbeat-thread
 lifecycle, interruption, claim-loss propagation and read-only preview behavior.
 MariaDB 10.1 SQL parsing, its real named-lock behavior, remote permissions and

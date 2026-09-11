@@ -208,6 +208,7 @@ class LiveNumericTest(unittest.TestCase):
         if detail:
             repo.target_table='seek_scrap_detail'
             repo.rows.return_value[0].update({'name':None,'file':None,'scrap_date':None})
+        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value = dict(idle_less_than=0, idle_less_than2=0, idle_more_than=0, idle_more_than2=0)
         browser=Mock()
         browser.numeric_profile.return_value=(profile, {'mode':'live_numeric','numeric_seek_id':42})
@@ -341,6 +342,7 @@ class AutomaticWorkflowTest(unittest.TestCase):
         repo.rows.return_value=[{'id_pk':1,'id':42,'uuid':None,'name':'Alex Example','file':'','scrap_date':None}]
         repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}
         if conflict:repo.submit_proposal.side_effect=ValueError('Conflicting approved identity mapping')
+        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value = dict(idle_less_than=0, idle_less_than2=0, idle_more_than=0, idle_more_than2=0)
         browser=Mock();browser.numeric_profile.return_value=(profile,{'mode':'live_numeric'})
         browser.search.return_value=({UID:'https://au.employer.seek.com/talentsearch/profiles/'+UID},True,'')

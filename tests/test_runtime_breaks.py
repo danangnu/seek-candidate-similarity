@@ -149,6 +149,7 @@ class RuntimeBreakTest(unittest.TestCase):
         repo.rows.return_value=[dict(id_pk=1,id=42,uuid=None,name=None,file=None,scrap_date=None)]
         zero={k:0 for k in SETTINGS}
         # Init, first candidate, post-break reconnect, then next boundary invalid.
+        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.side_effect=[zero,zero,zero,None]
         profile=extract_candidate_profile(FIXTURE)
         browser=Mock();browser.numeric_profile.return_value=(profile,{'mode':'live_numeric'})

@@ -50,7 +50,7 @@ The collector continues to submit pending proposals only into
 seek_uuid_match_review and seek_uuid_match_review_history. It never updates the
 candidate UUID, performs approvals, or imports old mappings.
 
-Validation: 147 tests passed, including source queries against fixtures matching
+Validation: 161 tests passed, including source queries against fixtures matching
 the new columns, ordering, candidate-value preservation, strict JSON, and both
 legacy/modern DDL branches translated into SQLite. No actual MariaDB 10.1 DDL,
 remote service connection, live SEEK session or review app was tested here.
