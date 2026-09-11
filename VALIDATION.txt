@@ -102,6 +102,26 @@ test_short_break_counts_towards_run_duration (test_runtime_breaks.RuntimeBreakTe
 test_timer_starts_after_login_and_first_candidate_has_no_break (test_runtime_breaks.RuntimeBreakTest.test_timer_starts_after_login_and_first_candidate_has_no_break) ... ok
 test_under_hour_uses_seconds_and_both_inclusive_endpoints (test_runtime_breaks.RuntimeBreakTest.test_under_hour_uses_seconds_and_both_inclusive_endpoints) ... ok
 test_zero_interval_does_not_sleep (test_runtime_breaks.RuntimeBreakTest.test_zero_interval_does_not_sleep) ... ok
+test_missing_next_changed_count_stays_unresolved (test_search_location.NumberedPaginationTest.test_missing_next_changed_count_stays_unresolved) ... ok
+test_missing_next_collects_38_cards_and_preserves_WA (test_search_location.NumberedPaginationTest.test_missing_next_collects_38_cards_and_preserves_WA) ... ok
+test_missing_next_repeated_page_stays_unresolved (test_search_location.NumberedPaginationTest.test_missing_next_repeated_page_stays_unresolved) ... ok
+test_missing_next_respects_page_limit (test_search_location.NumberedPaginationTest.test_missing_next_respects_page_limit) ... ok
+test_claim_loss_during_input_retry_stops_immediately (test_search_location.SearchLocationTest.test_claim_loss_during_input_retry_stops_immediately) ... ok
+test_claim_loss_is_not_converted_into_browser_timeout (test_search_location.SearchLocationTest.test_claim_loss_is_not_converted_into_browser_timeout) ... ok
+test_corrupted_location_input_retried_before_option_selection (test_search_location.SearchLocationTest.test_corrupted_location_input_retried_before_option_selection) ... ok
+test_default_WA_selected_through_autosuggest_then_reloaded (test_search_location.SearchLocationTest.test_default_WA_selected_through_autosuggest_then_reloaded) ... ok
+test_incomplete_search_keeps_progress (test_search_location.SearchLocationTest.test_incomplete_search_keeps_progress) ... ok
+test_input_is_reacquired_after_delay (test_search_location.SearchLocationTest.test_input_is_reacquired_after_delay) ... ok
+test_invalid_location_rejected (test_search_location.SearchLocationTest.test_invalid_location_rejected) ... ok
+test_location_text_elsewhere_is_not_a_selected_chip (test_search_location.SearchLocationTest.test_location_text_elsewhere_is_not_a_selected_chip) ... ok
+test_next_name_reuses_real_location_value (test_search_location.SearchLocationTest.test_next_name_reuses_real_location_value) ... ok
+test_null_location_preserves_all_Australia_search (test_search_location.SearchLocationTest.test_null_location_preserves_all_Australia_search) ... ok
+test_numeric_profile_timeout_report_has_safe_reason_and_stage (test_search_location.SearchLocationTest.test_numeric_profile_timeout_report_has_safe_reason_and_stage) ... ok
+test_option_is_reacquired_after_selection_delay (test_search_location.SearchLocationTest.test_option_is_reacquired_after_selection_delay) ... ok
+test_persistently_corrupted_input_never_collects_results (test_search_location.SearchLocationTest.test_persistently_corrupted_input_never_collects_results) ... ok
+test_timeout_diagnostics_classify_verification_without_url_tokens (test_search_location.SearchLocationTest.test_timeout_diagnostics_classify_verification_without_url_tokens) ... ok
+test_wrong_chip_after_navigation_stops_before_collecting_results (test_search_location.SearchLocationTest.test_wrong_chip_after_navigation_stops_before_collecting_results) ... ok
+test_wrong_option_does_not_fall_back_to_unfiltered_search (test_search_location.SearchLocationTest.test_wrong_option_does_not_fall_back_to_unfiltered_search) ... ok
 test_claim_queue_exclusion_for_dated_csv_and_undated (test_work_claims.ClaimSQLTest.test_claim_queue_exclusion_for_dated_csv_and_undated) ... ok
 test_expired_claim_can_be_taken_but_stale_owner_cannot_save_renew_or_release (test_work_claims.ClaimSQLTest.test_expired_claim_can_be_taken_but_stale_owner_cannot_save_renew_or_release) ... ok
 test_expired_token_cannot_submit_even_before_takeover (test_work_claims.ClaimSQLTest.test_expired_token_cannot_submit_even_before_takeover) ... ok
@@ -127,7 +147,7 @@ test_real_heartbeat_thread_uses_its_own_connection_and_closes (test_work_claims.
 test_slow_response_does_not_resurrect_local_lease (test_work_claims.LeaseTest.test_slow_response_does_not_resurrect_local_lease) ... ok
 
 ----------------------------------------------------------------------
-Ran 127 tests in 0.658s
+Ran 147 tests in 0.643s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -136,15 +156,10 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-Shared work claims update: 127 tests passed.
-SQL tests translate MariaDB syntax to SQLite. The two-connection race test
-emulates GET_LOCK with a shared mutex; this does not validate MariaDB's real
-named locks, server parsing, isolation or production performance.
-Tested claim acquisition, retry cooldown, expiry/takeover, stale-owner fencing,
-renewal during long operations, actual heartbeat-thread lifecycle, interruption,
-claim-loss propagation, limit after successful claim, read-only previews/checks,
-existing matching rules, transaction rollback and candidate preservation.
-Python compilation and example JSON configurations validated.
-No real database, candidate records, remote service or live SEEK session accessed.
-Deployment requires init-db for the new claim table, runtime claim permissions,
-and updating every worker before simultaneous runs. See MULTI_MACHINE.md.
+Pagination correction: 147 tests passed.
+Fake-browser cases cover 38 results over 20+18 cards with no Next control,
+preserved WA query, repeated pages, changed counts and page limits.
+No authenticated SEEK session or live MariaDB was accessed. The user report
+confirms 20 of 38 cards read on page 1 with location_verified=true; it does not
+show whether the Next control was delayed, absent or had changed markup.
+No candidate writes, schema changes or new dependencies are involved.

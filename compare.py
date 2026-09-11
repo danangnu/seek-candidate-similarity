@@ -69,7 +69,7 @@ def write_report(folder, numeric_id, report):
 
 
 def run(args, config, repo):
-    from seek_browser import SeekBrowser
+    from seek_browser import SeekBrowser, BrowserReadError
     created_by, assigned_reviewer = review_actors(config)
     print('Review-only mode: submit runs write work claims and pending proposals; candidate tables are never updated.')
     use_ollama = not args.no_ollama and (not getattr(args, 'auto_save', False) or getattr(args, 'with_ollama', False))
@@ -196,6 +196,9 @@ def run(args, config, repo):
                     except Exception as ex:
                         # Selenium errors may embed token-bearing URLs: do not serialize them.
                         candidate['capture_error'] = type(ex).__name__
+                        if isinstance(ex, BrowserReadError):
+                            candidate['reason'] = str(ex)
+                            candidate['browser_diagnostics'] = ex.diagnostics
                     report['candidates'].append(candidate)
                     if getattr(args, 'auto_save', False):
                         decision = automatic_match_decision([candidate], comparison_scope, report['search_complete'])
@@ -217,6 +220,8 @@ def run(args, config, repo):
                 for index, candidate in enumerate(ordered, 1):
                     if 'capture_error' in candidate:
                         print(index, candidate['uuid'], 'profile unreadable:', candidate['capture_error'])
+                        if candidate.get('reason'):
+                            print('Reason:', candidate['reason'])
                         continue
                     print(index, candidate['profile']['candidate_name'], candidate['uuid'])
                     print(json.dumps(candidate['evidence'], ensure_ascii=False, indent=2))
@@ -276,8 +281,13 @@ def run(args, config, repo):
                     raise
                 report['status'] = 'unresolved'
                 report['error_type'] = type(ex).__name__
+                if isinstance(ex, BrowserReadError):
+                    report['browser_diagnostics'] = ex.diagnostics
+                scan = getattr(browser, 'last_search_scan', None) if browser else None
+                if isinstance(scan, dict):
+                    report['search_scan'] = scan
                 # Only our controlled ValueError messages are displayed; never driver/SQL raw exceptions.
-                if type(ex) is ValueError:
+                if type(ex) is ValueError or isinstance(ex, BrowserReadError):
                     print('Unresolved:', str(ex))
                     report['reason'] = str(ex)
                 else:

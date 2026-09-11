@@ -150,3 +150,8 @@ transaction before reading settings again.
 
 For simultaneous workers, update every machine and use the same shared database
 and target_table. Work claims are automatic with --submit; see MULTI_MACHINE.md.
+
+Name searches default to Western Australia WA, including existing configurations.
+Set browser.search_location to null for an Australia-wide search. The collector
+resolves SEEK's location value via its visible autosuggest control; no guessed
+region ID is needed. See SEARCH_TROUBLESHOOTING.md for diagnostics.

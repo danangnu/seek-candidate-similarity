@@ -119,7 +119,7 @@ class PaginationTest(unittest.TestCase):
                     if result:return result
                 raise TimeoutError('No changed results')
         b=SeekBrowser.__new__(SeekBrowser); b.driver=Driver();b.wait=Wait();b.delay_seconds=0
-        b.config={'max_search_pages':limit,'max_candidates':100}
+        b.config={'max_search_pages':limit,'max_candidates':100,'search_location':None}
         self.exceptions=types.ModuleType('selenium.common.exceptions')
         self.exceptions.StaleElementReferenceException=Stale
         self.exceptions.ElementClickInterceptedException=Stale
@@ -154,7 +154,7 @@ class PaginationTest(unittest.TestCase):
         from unittest.mock import patch
         b=self.browser([1],[[UID]],card_names={UID:''})
         with patch.dict(sys.modules,{'selenium.common.exceptions':self.exceptions}):
-            with self.assertRaises(TimeoutError):b.search('Alex Example')
+            with self.assertRaises(ValueError):b.search('Alex Example')
 
     def test_all_pages_collected(self):
         from unittest.mock import patch
@@ -175,7 +175,7 @@ class PaginationTest(unittest.TestCase):
         from unittest.mock import patch
         b=self.browser([2,2],[[UID],[UID]])
         with patch.dict(sys.modules,{'selenium.common.exceptions':self.exceptions}):
-            with self.assertRaises(TimeoutError):b.search('Alex Example')
+            with self.assertRaises(ValueError):b.search('Alex Example')
 
     def test_zero_result_search_is_recognized(self):
         from unittest.mock import patch

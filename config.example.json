@@ -15,7 +15,8 @@
     "wait_seconds": 45,
     "max_search_pages": 5,
     "max_candidates": 100,
-    "delay_seconds": 10
+    "delay_seconds": 10,
+    "search_location": "Western Australia WA"
   },
   "path_mappings": [],
   "report_dir": "reports",

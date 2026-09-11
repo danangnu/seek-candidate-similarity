@@ -122,6 +122,14 @@ LIMIT 20;
 
 ## Collection and matching rules
 
+Name searches now default to **Western Australia WA**. The app selects the exact
+Location option, reads SEEK's location query value and verifies the selected chip.
+Existing configs receive this default; browser.search_location=null explicitly
+restores an Australia-wide search. This changes SEEK search scope only, not the
+database queue or comparison rule. See [SEARCH_TROUBLESHOOTING.md](SEARCH_TROUBLESHOOTING.md)
+for direct-pair diagnostics and the new timeout report fields. No schema change
+is required for this search update.
+
 The default source is numeric `seek_scrap_detail.seekid_detail`.
 `database.target_table` now identifies a READ-ONLY source; the alternate source
 `seek_scrap.id` remains supported. In the latest uploaded schema,
@@ -247,7 +255,7 @@ optional settings and the limits of expiry during network failures.
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 127 tests.
+Run `python -m unittest discover -s tests -v`. This release passed 147 tests.
 Claim tests cover competing workers, expiry/takeover, stale-token submission,
 renewal, retry delays, interruption cleanup, queue filtering, no unclaimed browser
 work, limit-after-claim behavior and read-only previews. Existing profile,
@@ -263,3 +271,25 @@ Added: `work_claims.py`, `tests/test_work_claims.py` and `MULTI_MACHINE.md`.
 Profile matching, the confirmed history-to-detail join, candidate read-only
 behavior and runtime break settings remain in place. Uploaded sample files are
 preserved.
+
+Latest search update: changed seek_browser.py, compare.py, both example configs,
+search documentation and tests/test_backfill.py; added tests/test_search_location.py
+and SEARCH_TROUBLESHOOTING.md. Location selection is based on the supplied search
+HTML and must be checked in an authenticated SEEK session. No live match for the
+reported candidate was confirmed here.
+
+Latest WA input correction: replace seek_browser.py on each worker. Complete
+location text is set in one update, verified across three polls, and retried up
+to three times. Inputs and options are reacquired after delays. Existing config
+can be retained; no schema or dependency change is required. Added five tests
+in tests/test_search_location.py. See SEARCH_TROUBLESHOOTING.md for a dry run.
+
+WA suggestion query correction: enter `Western Australia`, then select the exact
+`Western Australia WA` suggestion. The configured search_location remains
+`Western Australia WA`, and the selected chip must have that complete label.
+Replace seek_browser.py and restart; no configuration change is required.
+
+Latest pagination update: seek_browser.py falls back to the existing pageNumber
+URL parameter when the Next control is unavailable but more results remain.
+The confirmed WA filter and completeness checks are preserved. Four regression
+cases added to tests/test_search_location.py; see SEARCH_TROUBLESHOOTING.md.
