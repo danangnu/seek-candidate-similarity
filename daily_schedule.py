@@ -1,5 +1,6 @@
 """Shared database-clock schedule. Day 1 is Monday and day 7 is Sunday."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import re
 import time
 
@@ -50,19 +51,28 @@ def allowed_at(now, windows):
 class DailySchedule:
     refresh_seconds = 30
 
-    def __init__(self, load, *, clock=time.monotonic, sleep=time.sleep, emit=print):
+    def __init__(self, load, *, timezone_name="Australia/Perth", clock=time.monotonic, sleep=time.sleep, emit=print):
+        if not isinstance(timezone_name, str) or not timezone_name.strip():
+            raise ScheduleError("schedule.timezone must be an IANA timezone such as Australia/Perth.")
+        try:
+            self.zone = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ScheduleError("Unknown or unavailable schedule.timezone: "+timezone_name+
+                                ". Check the name and install requirements.txt (including tzdata).") from None
         self.load, self.clock, self.sleep, self.emit = load, clock, sleep, emit
         self.refresh()
-        self.emit('Daily schedule enabled: seek_run_times; database server time; '
-                  '1=Monday, 7=Sunday. Start inclusive, end exclusive.')
+        self.emit('Daily schedule enabled: seek_run_times; timezone '+self.zone.key+
+                  '; clock source database UTC. 1=Monday, 7=Sunday. Start inclusive, end exclusive.')
+        self.emit('Schedule local time: '+str(self.server_now.astimezone(self.zone).replace(microsecond=0)))
 
     def refresh(self):
         started = self.clock()
         try:
             snapshot = self.load()
-            now = snapshot['server_now']
+            now = snapshot['server_utc']
             if not isinstance(now, datetime):
-                raise ScheduleError('Cannot read the database server time for seek_run_times.')
+                raise ScheduleError('Cannot read the database UTC time for seek_run_times.')
+            now = now.replace(tzinfo=timezone.utc) if now.tzinfo is None else now.astimezone(timezone.utc)
             windows = validate_rows(snapshot['rows'])
         except ScheduleError:
             raise
@@ -81,15 +91,15 @@ class DailySchedule:
             if elapsed < 0 or elapsed >= self.refresh_seconds:
                 self.refresh()
                 elapsed = self.clock()-self.loaded_at
-            now = self.server_now + timedelta(seconds=max(0, elapsed))
+            now = (self.server_now + timedelta(seconds=max(0, elapsed))).astimezone(self.zone)
             if allowed_at(now, self.windows):
                 if claim_check:
                     claim_check()
                 if announced:
-                    self.emit('Daily schedule open; resuming at database time '+str(now.replace(microsecond=0)))
+                    self.emit('Daily schedule open; resuming at '+self.zone.key+' time '+str(now.replace(microsecond=0)))
                 return
             if self.clock() >= next_notice:
-                self.emit('Outside seek_run_times; paused at database time '+str(now.replace(microsecond=0))+
+                self.emit('Outside seek_run_times; paused at '+self.zone.key+' time '+str(now.replace(microsecond=0))+
                           '. Rechecking schedule every 30 seconds. Ctrl+C to stop.')
                 next_notice = self.clock()+60
             announced = True

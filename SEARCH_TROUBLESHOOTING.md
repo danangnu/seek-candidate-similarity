@@ -89,7 +89,7 @@ If Chrome shows verification, complete it manually. The app does not bypass it.
 Matching remains unchanged, candidate UUIDs remain read-only, and submissions
 still go to the separate human review queue.
 
-Validation: 161 tests passed, including fake-browser location selection/reuse,
+Validation: 166 tests passed, including fake-browser location selection/reuse,
 wrong/missing location rejection, unfiltered opt-out, lost-claim propagation,
 partial search progress and token-free timeout reporting. No live SEEK profile
 comparison, remote database write or new server latency test was performed.

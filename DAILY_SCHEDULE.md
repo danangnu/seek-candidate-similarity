@@ -7,14 +7,26 @@ weekday or staff identifier. Multiple windows for a day are supported.
 
 ## Time basis and supplied schedule
 
-Time is read with `SELECT NOW()` from the configured MariaDB session. Thus all
-machines using the same server/session timezone follow the same clock, regardless
-of the worker laptop timezone. Confirm the database clock represents the intended
-business time; the app does not force Perth time or convert stored times.
+The shared clock is read with `SELECT UTC_TIMESTAMP()` from MariaDB and converted
+in Python to `schedule.timezone`, defaulting to **Australia/Perth**. Schedule
+weekday and time boundaries use that business timezone, not the worker laptop
+clock or database session timezone. No server timezone settings are changed.
+For example, Friday 2026-09-11 04:20 UTC is Friday 12:20 in Perth, inside the
+uploaded Friday window of 07:00–20:11.
+
+Add this top-level section to make the business timezone explicit (existing
+configs receive the Perth default automatically):
+
+```json
+"schedule": {"timezone": "Australia/Perth"}
+```
+
+The startup log prints the selected timezone and converted local schedule time.
+An invalid or unavailable timezone stops the run. Install the updated
+requirements.txt; tzdata supplies timezone data on Windows.
 
 ```sql
-SELECT NOW() AS schedule_time, @@session.time_zone AS session_timezone,
-       @@system_time_zone AS server_timezone;
+SELECT UTC_TIMESTAMP() AS utc_clock, NOW() AS database_session_clock;
 SELECT day, time_from, time_to FROM seek_run_times ORDER BY day, id;
 ```
 
@@ -65,7 +77,8 @@ Copy these four runtime files together to every machine and restart:
 - seek_browser.py
 - daily_schedule.py (new)
 
-Keep your existing config.remote.json; no new setting or dependency is required.
+Keep your existing config.remote.json; schedule.timezone defaults to Australia/Perth.
+Install the updated requirements.txt for the tzdata dependency.
 The database user needs SELECT on seek_run_times. The table already exists in
 the supplied remote database. init-db does not create or modify scheduling rows.
 For a separate local database, copy just this table's schema/data into that
@@ -73,6 +86,7 @@ local database; the uploaded dump contains a USE trackitlive statement, so do
 not blindly run it against another intended database.
 
 ```powershell
+python -m pip install -r requirements.txt
 python compare.py --config config.remote.json check-connections --no-ollama
 python compare.py --config config.remote.json run --id 7532339 --auto-propose
 ```
@@ -83,9 +97,11 @@ maintenance commands, not scraping, and are not delayed by the schedule.
 
 ## Validation
 
-161 automated tests passed. New tests cover all seven uploaded windows, exact
+166 automated tests passed. New tests cover all seven uploaded windows, exact
 boundaries, overnight Sunday rollover, closed days, malformed data, multiple
 windows, database edits, failed refresh, claim loss, a delay crossing closing,
 repository reads, and stopping/cleanup on schedule errors. Browser/database
 integration tests use mocks and SQLite, not a live MariaDB 10.1.48 or SEEK session.
 No live database writes or browser session were performed here.
+Timezone tests include the reported Friday UTC/Perth discrepancy, local weekday
+rollover from UTC Sunday, closing boundaries, invalid zones, and explicit UTC override.

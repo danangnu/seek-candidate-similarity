@@ -60,8 +60,8 @@ class ScheduleTest(unittest.TestCase):
 
     def schedule(self, start, rows):
         clock=FakeTime()
-        load=Mock(side_effect=lambda:{'server_now':start+timedelta(seconds=clock.elapsed),'rows':rows})
-        schedule=DailySchedule(load,clock=clock.clock,sleep=clock.sleep,emit=Mock())
+        load=Mock(side_effect=lambda:{'server_utc':start+timedelta(seconds=clock.elapsed),'rows':rows})
+        schedule=DailySchedule(load,timezone_name='UTC',clock=clock.clock,sleep=clock.sleep,emit=Mock())
         return schedule,clock,load
 
     def test_wait_before_open_uses_database_clock_and_checks_claim(self):
@@ -78,7 +78,7 @@ class ScheduleTest(unittest.TestCase):
 
     def test_database_edits_applied_after_30_seconds(self):
         schedule,clock,load=self.schedule(datetime(2026,9,7,12),[])
-        load.side_effect=lambda:{'server_now':datetime(2026,9,7,12,0,30),'rows':[row()]}
+        load.side_effect=lambda:{'server_utc':datetime(2026,9,7,12,0,30),'rows':[row()]}
         schedule.wait_until_open()
         self.assertEqual(clock.elapsed,30);self.assertEqual(load.call_count,2)
 
@@ -107,12 +107,12 @@ class ScheduleTest(unittest.TestCase):
     def test_repository_reads_only_selected_database_schedule(self):
         repo=Repository.__new__(Repository);repo.connection=MagicMock();repo.verify_connection=Mock()
         cursor=repo.connection.cursor.return_value.__enter__.return_value
-        cursor.fetchone.return_value={'server_now':datetime(2026,9,7,12)}
+        cursor.fetchone.return_value={'server_utc':datetime(2026,9,7,12)}
         cursor.fetchall.return_value=[row()]
         result=repo.run_schedule()
         self.assertEqual(result['rows'],[row()])
         queries=[c.args[0] for c in cursor.execute.call_args_list]
-        self.assertEqual(queries,['SELECT NOW() AS server_now','SELECT day, time_from, time_to FROM seek_run_times ORDER BY day, id'])
+        self.assertEqual(queries,['SELECT UTC_TIMESTAMP() AS server_utc','SELECT day, time_from, time_to FROM seek_run_times ORDER BY day, id'])
         repo.connection.commit.assert_not_called()
 
     def test_run_missing_schedule_stops_before_claim_or_browser(self):
@@ -127,3 +127,36 @@ class ScheduleTest(unittest.TestCase):
         repo=fixture.execute_browser_failure(ScheduleError('invalid schedule'))
         self.assertEqual(repo.finish_claim.call_args.args[3],'stopped_schedule_error')
         repo.submit_proposal.assert_not_called()
+
+    def test_reported_friday_utc_clock_is_open_in_Perth(self):
+        load=Mock(return_value={'server_utc':datetime(2026,9,11,4,20,19),
+                               'rows':[row(5,'07:00','20:11')]})
+        sleep=Mock(side_effect=AssertionError('Should not wait at 12:20 Perth time'))
+        emit=Mock()
+        schedule=DailySchedule(load,sleep=sleep,emit=emit)
+        schedule.wait_until_open()
+        sleep.assert_not_called()
+        self.assertIn('12:20:19+08:00',str(emit.call_args_list))
+
+    def test_UTC_previous_day_uses_Perth_monday_window(self):
+        load=Mock(return_value={'server_utc':datetime(2026,9,6,23,1),
+                               'rows':[row(1,'07:01','22:00')]})
+        sleep=Mock(side_effect=AssertionError('Must use Monday in Perth, not UTC Sunday'))
+        DailySchedule(load,sleep=sleep,emit=Mock()).wait_until_open()
+
+    def test_Perth_end_is_exclusive_in_UTC(self):
+        load=Mock(return_value={'server_utc':datetime(2026,9,11,12,11),
+                               'rows':[row(5,'07:00','20:11')]})
+        schedule=DailySchedule(load,sleep=Mock(side_effect=KeyboardInterrupt),emit=Mock())
+        with self.assertRaises(KeyboardInterrupt):schedule.wait_until_open()
+
+    def test_invalid_timezone_is_not_silently_ignored(self):
+        for zone in ('Not/AZone',None,'',42):
+            with self.subTest(zone=zone),self.assertRaises(ScheduleError):
+                DailySchedule(Mock(),timezone_name=zone,emit=Mock())
+
+    def test_configured_timezone_overrides_Perth(self):
+        load=Mock(return_value={'server_utc':datetime(2026,9,11,4,20),
+                               'rows':[row(5,'07:00','20:11')]})
+        schedule=DailySchedule(load,timezone_name='UTC',sleep=Mock(side_effect=KeyboardInterrupt),emit=Mock())
+        with self.assertRaises(KeyboardInterrupt):schedule.wait_until_open()

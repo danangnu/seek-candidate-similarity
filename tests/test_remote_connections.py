@@ -134,7 +134,7 @@ class RemoteWorkflowTest(unittest.TestCase):
         repo=Mock();repo.database='trackitlive';repo.target_table='seek_scrap_detail'
         repo.iter_ids.return_value=[42]
         repo.rows.return_value=[dict(id_pk=1,id=42,uuid=None,name=None,file=None,scrap_date=None)]
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         repo.submit_proposal.return_value={'review_id': 7, 'status': 'pending', 'created': True}
         profile=extract_candidate_profile(FIXTURE)
@@ -152,7 +152,7 @@ class RemoteWorkflowTest(unittest.TestCase):
 
     def test_check_connections_never_mutates_database_or_opens_browser(self):
         repo=Mock();repo.target_table='seek_scrap_detail'
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=30,idle_less_than2=300,idle_more_than=5,idle_more_than2=25)
         with patch('compare.check_ollama') as model,patch('seek_browser.SeekBrowser') as browser,contextlib.redirect_stdout(io.StringIO()):
             check_connections({'ollama':{'endpoint':'http://ai.internal.example:11434'}},repo)
@@ -161,7 +161,7 @@ class RemoteWorkflowTest(unittest.TestCase):
 
     def test_database_schema_failure_does_not_skip_ollama_diagnostic(self):
         repo=Mock();repo.target_table='seek_scrap_detail';repo.preflight.side_effect=ValueError('Wrong column type')
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         with patch('compare.check_ollama') as model,contextlib.redirect_stdout(io.StringIO()),self.assertRaises(ValueError):
             check_connections({},repo)

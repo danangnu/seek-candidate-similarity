@@ -120,7 +120,7 @@ No server cursor or transaction remains open during browser work or breaks.
 
 Candidate UUIDs remain untouched. Every submission is pending human review.
 
-Validation: 161 tests passed. Link-specific checks cover mismatched legacy IDs,
+Validation: 166 tests passed. Link-specific checks cover mismatched legacy IDs,
 orphan/null-link pages, CSV dates and linked undated people. Added bounded early-stop, cross-page/date duplicate,
 reviewed/non-detail exclusion, CSV restriction, iterator resume and direct-ID
 bypass checks. SQL execution used SQLite adapters; real MariaDB 10.1 query plans,

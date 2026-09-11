@@ -179,7 +179,7 @@ class LeaseTest(unittest.TestCase):
 class ClaimWorkflowTest(unittest.TestCase):
     def repo(self):
         repo=Mock();repo.database='test';repo.target_table='seek_scrap_detail'
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         repo.rows.return_value=[]
         return repo

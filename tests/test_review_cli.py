@@ -19,7 +19,7 @@ class ReviewCliTest(unittest.TestCase):
             with self.subTest(csv=use_csv), tempfile.TemporaryDirectory() as folder:
                 repo=Mock();repo.database='test';repo.target_table='seek_scrap_detail'
                 repo.iter_ids.return_value=[90,70,3] if use_csv else [90,12,70,3];repo.rows.return_value=[]
-                repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+                repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
                 repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
                 csv_file=Path(folder)/'ids.csv';csv_file.write_text('id\n3\n70\n90\n')
                 args=argparse.Namespace(apply=False,auto_save=True,id=None,csv=str(csv_file) if use_csv else None,
@@ -47,7 +47,7 @@ class ReviewCliTest(unittest.TestCase):
     def execute(self,auto=True,fail_report=False):
         repo=Mock();repo.database='remote';repo.target_table='seek_scrap_detail';repo.iter_ids.return_value=[42]
         repo.rows.return_value=[{'id':42,'id_pk':1,'uuid':12345,'name':None,'file':None,'scrap_date':None}]
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         repo.submit_proposal.return_value={'review_id':77,'status':'pending','created':True}
         browser=Mock();profile=extract_candidate_profile(FIXTURE)

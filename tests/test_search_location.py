@@ -149,7 +149,7 @@ class SearchLocationTest(unittest.TestCase):
         from compare import run
         repo=Mock();repo.database='test';repo.target_table='seek_scrap_detail'
         repo.rows.return_value=[{'id':563879489,'id_pk':1,'name':None,'uuid':None,'file':None,'scrap_date':None}]
-        repo.run_schedule.return_value = {'server_now': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
+        repo.run_schedule.return_value = {'server_utc': __import__('datetime').datetime(2026, 9, 7, 12), 'rows': [{'day': 1, 'time_from': '00:00', 'time_to': '23:59:59'}]}
         repo.scrap_idle_settings.return_value=dict(idle_less_than=0,idle_less_than2=0,idle_more_than=0,idle_more_than2=0)
         browser=Mock();browser.numeric_profile.side_effect=BrowserReadError('Timed out loading the complete numeric profile',{'stage':'loading the complete numeric profile','page_kind':'profile'})
         args=argparse.Namespace(apply=False,auto_save=True,id=563879489,csv=None,limit=1,no_ollama=True,uuid=None)

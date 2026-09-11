@@ -255,7 +255,7 @@ optional settings and the limits of expiry during network failures.
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 161 tests.
+Run `python -m unittest discover -s tests -v`. This release passed 166 tests.
 Claim tests cover competing workers, expiry/takeover, stale-token submission,
 renewal, retry delays, interruption cleanup, queue filtering, no unclaimed browser
 work, limit-after-claim behavior and read-only previews. Existing profile,
@@ -294,9 +294,16 @@ URL parameter when the Next control is unavailable but more results remain.
 The confirmed WA filter and completeness checks are preserved. Four regression
 cases added to tests/test_search_location.py; see SEARCH_TROUBLESHOOTING.md.
 
-Daily schedule update: every run reads seek_run_times using database server time.
+Daily schedule update: every run reads seek_run_times using database UTC converted to Australia/Perth time.
 Day 1=Monday through 7=Sunday. It waits outside allowed windows before claims
 and browser actions. Replace compare.py, repository.py and seek_browser.py,
 and add daily_schedule.py on every worker. Keep existing configuration.
 See DAILY_SCHEDULE.md for the supplied timetable, permissions, waiting behavior
 and validation. check-connections now validates scheduling access and times.
+
+Schedule timezone correction: business hours now use schedule.timezone, default
+Australia/Perth, converted from MariaDB UTC_TIMESTAMP(). Replace compare.py,
+repository.py, daily_schedule.py and requirements.txt; run python -m pip install
+-r requirements.txt. Existing config receives the Perth default automatically.
+The prior database-local-clock assumption caused an eight-hour error in the
+reported environment. No schedule rows or server timezone settings are changed.

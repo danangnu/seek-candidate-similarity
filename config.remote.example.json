@@ -20,8 +20,8 @@
   "browser": {
     "chromedriver": "",
     "wait_seconds": 45,
-    "max_search_pages": 5,
-    "max_candidates": 100,
+    "max_search_pages": 15,
+    "max_candidates": 300,
     "delay_seconds": 10,
     "search_location": "Western Australia WA"
   },
@@ -39,5 +39,8 @@
     "lease_seconds": 600,
     "heartbeat_seconds": 60,
     "retry_seconds": 3600
+  },
+  "schedule": {
+    "timezone": "Australia/Perth"
   }
 }

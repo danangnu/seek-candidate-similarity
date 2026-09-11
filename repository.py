@@ -98,11 +98,11 @@ class Repository:
         self.connection.ping(reconnect=True)
         self.verify_connection()
         with self.connection.cursor() as cur:
-            cur.execute('SELECT NOW() AS server_now')
-            now = cur.fetchone()['server_now']
+            cur.execute('SELECT UTC_TIMESTAMP() AS server_utc')
+            now = cur.fetchone()['server_utc']
             cur.execute('SELECT day, time_from, time_to FROM seek_run_times ORDER BY day, id')
             rows = cur.fetchall()
-        return {'server_now': now, 'rows': rows}
+        return {'server_utc': now, 'rows': rows}
 
     def scrap_idle_settings(self, settings_id=1):
         from runtime_breaks import BreakSettingsError

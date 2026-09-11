@@ -38,14 +38,19 @@ test_path_mapping_preserves_id_subfolder (test_backfill.ProfilesTest.test_path_m
 test_scopes_roles_and_ignores_recommendations (test_backfill.ProfilesTest.test_scopes_roles_and_ignores_recommendations) ... ok
 test_transaction_rolls_back_on_failure (test_backfill.ProfilesTest.test_transaction_rolls_back_on_failure) ... ok
 test_url_validation_and_token_exclusion (test_backfill.ProfilesTest.test_url_validation_and_token_exclusion) ... ok
+test_Perth_end_is_exclusive_in_UTC (test_daily_schedule.ScheduleTest.test_Perth_end_is_exclusive_in_UTC) ... ok
+test_UTC_previous_day_uses_Perth_monday_window (test_daily_schedule.ScheduleTest.test_UTC_previous_day_uses_Perth_monday_window) ... ok
 test_browser_delay_crossing_end_never_navigates (test_daily_schedule.ScheduleTest.test_browser_delay_crossing_end_never_navigates) ... ok
 test_cached_schedule_stops_at_end_and_ctrl_c_works (test_daily_schedule.ScheduleTest.test_cached_schedule_stops_at_end_and_ctrl_c_works) ... ok
 test_claim_loss_during_closed_period_propagates (test_daily_schedule.ScheduleTest.test_claim_loss_during_closed_period_propagates) ... ok
+test_configured_timezone_overrides_Perth (test_daily_schedule.ScheduleTest.test_configured_timezone_overrides_Perth) ... ok
 test_database_edits_applied_after_30_seconds (test_daily_schedule.ScheduleTest.test_database_edits_applied_after_30_seconds) ... ok
+test_invalid_timezone_is_not_silently_ignored (test_daily_schedule.ScheduleTest.test_invalid_timezone_is_not_silently_ignored) ... ok
 test_invalid_values_fail_closed (test_daily_schedule.ScheduleTest.test_invalid_values_fail_closed) ... ok
 test_missing_blank_and_equal_days_closed (test_daily_schedule.ScheduleTest.test_missing_blank_and_equal_days_closed) ... ok
 test_multiple_windows_allow_lunch_gap (test_daily_schedule.ScheduleTest.test_multiple_windows_allow_lunch_gap) ... ok
 test_refresh_failure_stops_without_raw_database_details (test_daily_schedule.ScheduleTest.test_refresh_failure_stops_without_raw_database_details) ... ok
+test_reported_friday_utc_clock_is_open_in_Perth (test_daily_schedule.ScheduleTest.test_reported_friday_utc_clock_is_open_in_Perth) ... ok
 test_repository_reads_only_selected_database_schedule (test_daily_schedule.ScheduleTest.test_repository_reads_only_selected_database_schedule) ... ok
 test_run_missing_schedule_stops_before_claim_or_browser (test_daily_schedule.ScheduleTest.test_run_missing_schedule_stops_before_claim_or_browser) ... ok
 test_run_schedule_error_during_profile_stops_and_releases_claim (test_daily_schedule.ScheduleTest.test_run_schedule_error_during_profile_stops_and_releases_claim) ... ok
@@ -161,7 +166,7 @@ test_real_heartbeat_thread_uses_its_own_connection_and_closes (test_work_claims.
 test_slow_response_does_not_resurrect_local_lease (test_work_claims.LeaseTest.test_slow_response_does_not_resurrect_local_lease) ... ok
 
 ----------------------------------------------------------------------
-Ran 161 tests in 0.655s
+Ran 166 tests in 0.808s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -170,5 +175,5 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-Daily schedule validation: fake clocks, mocked browser/database and existing SQLite tests.
-No live SEEK or MariaDB session. No candidate/table writes. See DAILY_SCHEDULE.md.
+Timezone correction validated with fake UTC clocks and existing mocks/SQLite fixtures.
+No live MariaDB/SEEK accessed. Windows users need updated requirements.txt (tzdata).

@@ -157,5 +157,5 @@ resolves SEEK's location value via its visible autosuggest control; no guessed
 region ID is needed. See SEARCH_TROUBLESHOOTING.md for diagnostics.
 
 Daily schedule: the account also needs SELECT on seek_run_times. All workers
-use NOW() from the configured database session. See DAILY_SCHEDULE.md and check
-the server clock before deployment. No schedule rows are written by this app.
+use UTC_TIMESTAMP() from MariaDB converted to schedule.timezone (Australia/Perth
+by default). Install requirements.txt for Windows timezone data. See DAILY_SCHEDULE.md. No schedule rows are written by this app.

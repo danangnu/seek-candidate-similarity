@@ -98,7 +98,7 @@ def run(args, config, repo):
     ids = chain([first_id], queue if args.apply else islice(queue, args.limit-1)) if first_id is not None else ()
     breaks = RuntimeBreaks(created_by, repo.scrap_idle_settings,
                            config.get('breaks', {}).get('settings_id', 1)) if first_id is not None else None
-    schedule = DailySchedule(repo.run_schedule) if first_id is not None else None
+    schedule = DailySchedule(repo.run_schedule, timezone_name=config.get('schedule', {}).get('timezone', 'Australia/Perth')) if first_id is not None else None
     folder = Path(config.get('report_dir', 'reports')) / str(uuid4())
     browser = None
     attempted = 0
@@ -330,7 +330,7 @@ def check_connections(config, repo, no_ollama=False):
     checks = [
         ('Candidate source and profile dates (read-only)', lambda: repo.preflight([repo.target_table, 'seek_scrap'])),
         ('Review queue, history and work claims', lambda: repo.preflight(['seek_uuid_match_review', 'seek_uuid_match_review_history', 'seek_uuid_work_claim'])),
-        ('Daily schedule (database server time)', lambda: DailySchedule(repo.run_schedule)),
+        ('Daily schedule (configured business timezone)', lambda: DailySchedule(repo.run_schedule, timezone_name=config.get('schedule', {}).get('timezone', 'Australia/Perth'))),
         ('Runtime break settings', lambda: validate_settings(repo.scrap_idle_settings(config.get('breaks', {}).get('settings_id', 1))))]
     if not no_ollama:
         checks.append(('Ollama endpoint and model', lambda: check_ollama(**ollama_options(config.get('ollama', {})))))
