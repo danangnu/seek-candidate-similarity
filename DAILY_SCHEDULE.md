@@ -97,7 +97,7 @@ maintenance commands, not scraping, and are not delayed by the schedule.
 
 ## Validation
 
-166 automated tests passed. New tests cover all seven uploaded windows, exact
+171 automated tests passed. New tests cover all seven uploaded windows, exact
 boundaries, overnight Sunday rollover, closed days, malformed data, multiple
 windows, database edits, failed refresh, claim loss, a delay crossing closing,
 repository reads, and stopping/cleanup on schedule errors. Browser/database
@@ -105,3 +105,7 @@ integration tests use mocks and SQLite, not a live MariaDB 10.1.48 or SEEK sessi
 No live database writes or browser session were performed here.
 Timezone tests include the reported Friday UTC/Perth discrepancy, local weekday
 rollover from UTC Sunday, closing boundaries, invalid zones, and explicit UTC override.
+
+Runtime-break cadence update: breaks now occur after a randomly chosen 5–10
+numeric candidate attempts, before starting the next batch. Daily schedule
+pauses do not reset the batch counter. See README.md for counting details.

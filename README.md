@@ -211,7 +211,7 @@ the deterministic comparison. Review decisions do not automatically train models
 
 The ten-second request delay remains. The four idle settings are read from
 `seek_scrap_settings` in the configured database (`breaks.settings_id`, default 1).
-Before one elapsed hour, between-candidate breaks use `idle_less_than` to
+Before one elapsed hour, between-batch breaks use `idle_less_than` to
 `idle_less_than2` seconds; at/after one hour, `idle_more_than` to `idle_more_than2`
 minutes. The per-process timer starts after sign-in, includes breaks, and does
 not reset after a long break. Invalid settings stop the run. Ctrl+C interrupts.
@@ -255,7 +255,7 @@ optional settings and the limits of expiry during network failures.
 
 ## Validation and changed files
 
-Run `python -m unittest discover -s tests -v`. This release passed 166 tests.
+Run `python -m unittest discover -s tests -v`. This release passed 171 tests.
 Claim tests cover competing workers, expiry/takeover, stale-token submission,
 renewal, retry delays, interruption cleanup, queue filtering, no unclaimed browser
 work, limit-after-claim behavior and read-only previews. Existing profile,
@@ -307,3 +307,34 @@ repository.py, daily_schedule.py and requirements.txt; run python -m pip install
 -r requirements.txt. Existing config receives the Perth default automatically.
 The prior database-local-clock assumption caused an eight-hour error in the
 reported environment. No schedule rows or server timezone settings are changed.
+
+## Random candidate batches before runtime breaks
+
+Runtime breaks now occur between batches of 5–10 numeric candidates. A random
+integer from 5 through 10 (inclusive) is chosen after sign-in and after each
+completed break. Repeats are allowed. Example: 5 candidates, break, 7 candidates,
+break, 10 candidates, break, 6 candidates. A break happens only if another
+candidate is about to start; there is no unnecessary break when the run ends.
+
+The duration still comes from seek_scrap_settings: under one elapsed hour,
+idle_less_than..idle_less_than2 seconds; at/after one hour,
+idle_more_than..idle_more_than2 minutes. Crossing one hour does not interrupt a
+batch; the duration tier is evaluated when the next break is due.
+
+An attempt counts once when admitted by before_candidate, whether it ultimately
+finds a match or is unresolved. Multiple UUID profiles for that numeric ID do
+not count separately. IDs skipped before admission (including claims held by
+other workers or missing source rows) do not count. The counter is per process,
+resets on restart, and is preserved across daily-schedule waits. The overall
+runtime timer still includes pauses. Existing browser delays and daily schedule
+remain enforced. Break settings continue to be validated on every candidate.
+
+The console shows Candidate batch: X/N. Reports include batch_target,
+candidates_before_this and candidate_in_batch; reports following a break also
+include completed_batch_size and next_batch_target. No candidate or review
+schema change is required.
+
+For this update, replace runtime_breaks.py on every machine and restart. Keep
+your current configuration and database settings. Tests cover a deterministic
+5/7/10/6 batch sequence, crossing one hour within a batch, interrupt handling,
+repeated start calls and invalid settings during a batch.

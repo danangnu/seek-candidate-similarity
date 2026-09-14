@@ -30,7 +30,7 @@ class RuntimeBreakTest(unittest.TestCase):
         choose = Mock(side_effect=lambda low, high: high if select_upper else low)
         logs = []
         timer = RuntimeBreaks(reviewer, load, clock=clock.now, sleep=clock.sleep,
-                              randint=choose, emit=logs.append)
+                              randint=choose, emit=logs.append, batch_min=1, batch_max=1)
         return timer, clock, load, choose, logs
 
     def test_timer_starts_after_login_and_first_candidate_has_no_break(self):
@@ -165,6 +165,63 @@ class RuntimeBreakTest(unittest.TestCase):
         browser.numeric_profile.assert_called_once_with(42)
         browser.close.assert_called_once()
         repo.submit_proposal.assert_not_called()
+
+
+class CandidateBatchTest(unittest.TestCase):
+    def test_random_batches_5_7_10_6_break_only_before_next_candidate(self):
+        clock=FakeClock()
+        choose=Mock(side_effect=[5,7,10,6,8])
+        timer=RuntimeBreaks('staff',lambda _:dict(SETTINGS),clock=clock.now,
+                            sleep=clock.sleep,randint=lambda lo,hi:lo,batch_randint=choose,emit=lambda _:None)
+        timer.start()
+        breaks=[]
+        for candidate in range(1,30):
+            record=timer.before_candidate()
+            if record['duration_seconds']:
+                breaks.append(candidate)
+        self.assertEqual(breaks,[6,13,23,29])
+        self.assertEqual(choose.call_count,5)
+        for call in choose.call_args_list:self.assertEqual(call.args,(5,10))
+        self.assertEqual(sum(clock.sleeps),4*30)
+
+    def test_one_hour_crossing_does_not_break_mid_batch(self):
+        clock=FakeClock()
+        timer=RuntimeBreaks('staff',lambda _:dict(SETTINGS),clock=clock.now,
+                            sleep=clock.sleep,randint=lambda lo,hi:lo,batch_randint=lambda lo,hi:5,emit=lambda _:None)
+        timer.start();timer.before_candidate();clock.value=3600
+        for _ in range(4):self.assertEqual(timer.before_candidate()['duration_seconds'],0)
+        record=timer.before_candidate()
+        self.assertEqual(record['duration_seconds'],300)
+        self.assertEqual(record['phase'],'at_or_after_one_hour')
+        self.assertEqual(record['completed_batch_size'],5)
+        self.assertEqual(record['candidate_in_batch'],1)
+        self.assertEqual(timer.started_at,0)
+
+    def test_restart_start_call_does_not_reset_existing_batch(self):
+        clock=FakeClock();choose=Mock(return_value=10)
+        timer=RuntimeBreaks('staff',lambda _:dict(SETTINGS),clock=clock.now,
+                            sleep=clock.sleep,batch_randint=choose,emit=lambda _:None)
+        timer.start();timer.before_candidate();timer.start()
+        self.assertEqual(timer.before_candidate()['candidate_in_batch'],2)
+        self.assertEqual(choose.call_count,1)
+        self.assertEqual(clock.sleeps,[])
+
+    def test_interrupted_break_does_not_admit_candidate_or_choose_next_batch(self):
+        clock=FakeClock();choose=Mock(return_value=5)
+        timer=RuntimeBreaks('staff',lambda _:dict(SETTINGS),clock=clock.now,
+                            sleep=Mock(side_effect=KeyboardInterrupt),batch_randint=choose,emit=lambda _:None)
+        timer.start()
+        for _ in range(5):timer.before_candidate()
+        with self.assertRaises(KeyboardInterrupt):timer.before_candidate()
+        self.assertEqual(timer.candidates_since_break,5)
+        self.assertEqual(choose.call_count,1)
+
+    def test_invalid_settings_stop_even_within_batch(self):
+        loader=Mock(return_value=dict(SETTINGS))
+        timer=RuntimeBreaks('staff',loader,batch_randint=lambda lo,hi:5,emit=lambda _:None)
+        timer.start();timer.before_candidate();loader.return_value=None
+        with self.assertRaises(BreakSettingsError):timer.before_candidate()
+        self.assertEqual(timer.candidates_since_break,1)
 
 
 if __name__=='__main__':unittest.main()

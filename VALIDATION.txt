@@ -108,6 +108,11 @@ test_nonautomatic_mode_submits_without_operator_review_prompts (test_review_cli.
 test_numeric_parent_link_is_compared_and_assignment_forwarded (test_review_cli.ReviewCliTest.test_numeric_parent_link_is_compared_and_assignment_forwarded) ... ok
 test_report_failure_after_commit_does_not_claim_submission_failed (test_review_cli.ReviewCliTest.test_report_failure_after_commit_does_not_claim_submission_failed) ... ok
 test_retired_mutation_commands_rejected_before_connecting (test_review_cli.ReviewCliTest.test_retired_mutation_commands_rejected_before_connecting) ... ok
+test_interrupted_break_does_not_admit_candidate_or_choose_next_batch (test_runtime_breaks.CandidateBatchTest.test_interrupted_break_does_not_admit_candidate_or_choose_next_batch) ... ok
+test_invalid_settings_stop_even_within_batch (test_runtime_breaks.CandidateBatchTest.test_invalid_settings_stop_even_within_batch) ... ok
+test_one_hour_crossing_does_not_break_mid_batch (test_runtime_breaks.CandidateBatchTest.test_one_hour_crossing_does_not_break_mid_batch) ... ok
+test_random_batches_5_7_10_6_break_only_before_next_candidate (test_runtime_breaks.CandidateBatchTest.test_random_batches_5_7_10_6_break_only_before_next_candidate) ... ok
+test_restart_start_call_does_not_reset_existing_batch (test_runtime_breaks.CandidateBatchTest.test_restart_start_call_does_not_reset_existing_batch) ... ok
 test_database_error_has_no_raw_connection_details (test_runtime_breaks.RuntimeBreakTest.test_database_error_has_no_raw_connection_details) ... ok
 test_each_running_user_has_independent_timer (test_runtime_breaks.RuntimeBreakTest.test_each_running_user_has_independent_timer) ... ok
 test_exactly_one_hour_and_later_use_minutes (test_runtime_breaks.RuntimeBreakTest.test_exactly_one_hour_and_later_use_minutes) ... ok
@@ -166,7 +171,7 @@ test_real_heartbeat_thread_uses_its_own_connection_and_closes (test_work_claims.
 test_slow_response_does_not_resurrect_local_lease (test_work_claims.LeaseTest.test_slow_response_does_not_resurrect_local_lease) ... ok
 
 ----------------------------------------------------------------------
-Ran 166 tests in 0.808s
+Ran 171 tests in 0.819s
 
 OK
 Checked 2 result cards; up to 2 exact-name profiles to compare; skipped 0 different-name results.
@@ -175,5 +180,5 @@ Checked 1 result cards; up to 0 exact-name profiles to compare; skipped 1 differ
 Checked 1 result cards; up to 1 exact-name profiles to compare; skipped 0 different-name results.
 Checked 0 result cards; up to 0 exact-name profiles to compare; skipped 0 different-name results.
 
-Timezone correction validated with fake UTC clocks and existing mocks/SQLite fixtures.
-No live MariaDB/SEEK accessed. Windows users need updated requirements.txt (tzdata).
+Random candidate batches: 171 tests passed using fake clocks/mocks and SQLite.
+No live browser or database writes. Only runtime_breaks.py changed in runtime code.
